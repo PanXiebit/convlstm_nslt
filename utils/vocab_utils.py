@@ -75,10 +75,25 @@ def check_vocab(vocab_file, out_dir, sos=None, eos=None, unk=None):
 def create_tgt_vocab_table(tgt_vocab_file):
     """Creates vocab tables for src_vocab_file and tgt_vocab_file."""
     tgt_vocab_table = lookup_ops.index_table_from_file(tgt_vocab_file, default_value=UNK_ID)
-
     return tgt_vocab_table
+
+def create_tgt_dict(tgt_vocab_file):
+    word2idx = {"<pad>" : 0, "<s>":1, "</s>" :2, "<unk>":3}
+    idx2word = {}
+    count = len(word2idx)
+    with open(tgt_vocab_file, "r") as f:
+        for line in f:
+            word = line.strip()
+            if word not in word2idx:
+                word2idx[word] = count
+                count += 1
+    for word, idx in word2idx.items():
+        idx2word[idx] = word
+    return word2idx, idx2word
 
 if __name__ == "__main__":
     tgt_vocab_file = "/home/panxie/Documents/sign-language/nslt/Data/phoenix2014T.vocab.de"
-    tgt_vocab_table = create_tgt_vocab_table(tgt_vocab_file)
-    print(tgt_vocab_table.lookup(tf.constant("</s>")))
+    # tgt_vocab_table = create_tgt_vocab_table(tgt_vocab_file)
+    # print(tgt_vocab_table.lookup(tf.constant("<pad>")))
+    word2idx, idx2word = create_tgt_dict(tgt_vocab_file)
+    print(idx2word[0])

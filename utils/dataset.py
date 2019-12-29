@@ -39,8 +39,9 @@ class BatchedInput(collections.namedtuple("BatchedInput",
 
 
 def get_number_of_frames(src):
-    src = src.numpy()                   # os.listdir(path), path cannot be tensor.
+    src = src.numpy()  # os.listdir(path), path cannot be tensor.
     return np.int32(len([f for f in listdir(src) if isfile(join(src, f))]))
+
 
 def read_video(src, source_reverse):
     src = src.numpy()
@@ -63,9 +64,11 @@ def read_video(src, source_reverse):
 
     return video
 
+
 # 定义bucket的最小和最大边界，以及
 _MIN_BOUNDARY = 8
 _BOUNDARY_SCALE = 1.4
+
 
 def _batch_examples(dataset, batch_size, src_max_length):
     buckets_min, buckets_max = _create_min_max_boundaries(src_max_length)
@@ -95,7 +98,7 @@ def _batch_examples(dataset, batch_size, src_max_length):
         # examples have the same length, and all target sequences have the same
         # lengths as well. Resulting lengths of inputs and targets can differ.
         return grouped_dataset.padded_batch(bucket_batch_size, ([None, None, None, None],
-                                                                  [None],[None], [], []))
+                                                                [None], [None], [], []))
 
     return dataset.apply(tf.data.experimental.group_by_window(
         key_func=example_to_bucket_id,
@@ -103,12 +106,14 @@ def _batch_examples(dataset, batch_size, src_max_length):
         window_size=None,
         window_size_func=window_size_fn))
 
+
 def _get_example_length(example):
     # print(tf.shape(example[0]), tf.shape(example[1]))
     # exit()
     """Returns the maximum length between the example inputs and targets."""
     length = tf.maximum(tf.shape(example[0])[0], tf.shape(example[1])[0])
     return length
+
 
 def _create_min_max_boundaries(
         max_length, min_boundary=_MIN_BOUNDARY, boundary_scale=_BOUNDARY_SCALE):
@@ -149,7 +154,6 @@ def get_iterator(src_dataset,
                  tgt_max_len=None,
                  num_parallel_calls=None,
                  skip_count=None):
-
     # Cihan_CR: Hard Codded - Need to Change this
     # if not output_buffer_size:
     #     output_buffer_size = 10  # batch_size * 1000
@@ -169,28 +173,24 @@ def get_iterator(src_dataset,
     src_tgt_dataset = src_tgt_dataset.shuffle(output_buffer_size * 1000, random_seed)
 
     # Get number of frames from videos
-    src_tgt_dataset = src_tgt_dataset.map(lambda src, tgt:(src, tgt, tf.py_function(get_number_of_frames, [src], tf.int32)),
-                                          num_parallel_calls=num_parallel_calls)   # src_path, tgt_string, src_len
-
+    src_tgt_dataset = src_tgt_dataset.map(
+        lambda src, tgt: (src, tgt, tf.py_function(get_number_of_frames, [src], tf.int32)),
+        num_parallel_calls=num_parallel_calls)  # src_path, tgt_string, src_len
 
     # Split Translation into Tokens
     src_tgt_dataset = src_tgt_dataset.map(lambda src, tgt, src_len:
                                           (src, tf.strings.split([tgt]).values, src_len),
-                                          num_parallel_calls=num_parallel_calls)   # src_path, tgt_tokens, src_len
-
-
+                                          num_parallel_calls=num_parallel_calls)  # src_path, tgt_tokens, src_len
 
     # Sequence Length Checks
     src_tgt_dataset = src_tgt_dataset.filter(lambda src, tgt, src_len: tf.logical_and(src_len > 0, tf.size(tgt) > 0))
-    src_tgt_dataset = src_tgt_dataset.filter(lambda src, tgt, src_len: tf.logical_and(src_len < src_max_len, tf.size(tgt) < tgt_max_len))
-
-
+    src_tgt_dataset = src_tgt_dataset.filter(
+        lambda src, tgt, src_len: tf.logical_and(src_len < src_max_len, tf.size(tgt) < tgt_max_len))
 
     # Convert Tokens to IDs
     src_tgt_dataset = src_tgt_dataset.map(lambda src, tgt, src_len:
                                           (src, tf.cast(tgt_vocab_table.lookup(tgt), tf.int32), src_len),
-                                          num_parallel_calls=num_parallel_calls)     # src_path, tgt_ids, src_len
-
+                                          num_parallel_calls=num_parallel_calls)  # src_path, tgt_ids, src_len
 
     # Create Input and Output for Target
     src_tgt_dataset = src_tgt_dataset.map(lambda src, tgt, src_len:
@@ -198,13 +198,12 @@ def get_iterator(src_dataset,
                                            tf.concat(([tgt_sos_id], tgt), 0),
                                            tf.concat((tgt, [tgt_eos_id]), 0),
                                            src_len),
-                                          num_parallel_calls=num_parallel_calls)   # src_path, tgt_in_ids, tgt_out_ids, src_len
+                                          num_parallel_calls=num_parallel_calls)  # src_path, tgt_in_ids, tgt_out_ids, src_len
 
     # Get Target Sequence Length
     src_tgt_dataset = src_tgt_dataset.map(lambda src, tgt_in, tgt_out, src_len:
                                           (src, tgt_in, tgt_out, src_len, tf.size(tgt_in)),
-                                          num_parallel_calls=num_parallel_calls)   # src_path, tgt_in_ids, tgt_out_ids, src_len, tgt_len
-
+                                          num_parallel_calls=num_parallel_calls)  # src_path, tgt_in_ids, tgt_out_ids, src_len, tgt_len
 
     src_tgt_dataset = src_tgt_dataset.map(lambda src, tgt_in, tgt_out, src_len, tgt_len:
                                           (tf.py_function(read_video, [src, source_reverse], tf.float32),
@@ -217,56 +216,71 @@ def get_iterator(src_dataset,
 
     src_tgt_dataset = _batch_examples(src_tgt_dataset, batch_size=301, src_max_length=300)
 
-
     src_tgt_dataset = src_tgt_dataset.repeat(count=1)
 
     # Create Initializer
     return src_tgt_dataset
 
-def get_infer_iterator(src_dataset,
-                       source_reverse,
-                       src_max_len=None):
 
+def get_infer_iterator(src_dataset, source_reverse):
     # Get number of Frames
     src_dataset = src_dataset.map(lambda src: (src, tf.py_function(get_number_of_frames, [src], tf.int32)))
-
+    # for data in src_dataset.take(1):
+    #     print(data)
+    #     exit()
     # Filter Out Samples
-    src_dataset = src_dataset.filter(lambda src, src_len: tf.logical_and(src_len > 0, src_len < src_max_len))
+    # src_dataset = src_dataset.filter(lambda src, src_len: tf.logical_and(src_len > 0, src_len < src_max_len))
 
     src_dataset = src_dataset.map(lambda src, src_len:
                                   (tf.py_function(read_video, [src, source_reverse], tf.float32),
                                    tf.reshape(src_len, [1])))
+    src_dataset = src_dataset.map(lambda  src, src_len: (tf.expand_dims(src, axis=0), src_len))
 
     src_dataset = src_dataset.repeat(1)
     return src_dataset
 
-def get_dataset(src_file, tgt_file, tgt_vocab_table):
+
+def get_train_dataset(src_file, tgt_file, tgt_vocab_table):
     src_dataset = tf.data.TextLineDataset(src_file)
     tgt_dataset = tf.data.TextLineDataset(tgt_file)
 
     iterator = get_iterator(src_dataset,
-                                 tgt_dataset,
-                                 tgt_vocab_table,
-                                 sos="<s>",
-                                 eos="</s>",
-                                 source_reverse=True,
-                                 random_seed=285,
-                                 src_max_len=300,
-                                 tgt_max_len=50,
-                                 skip_count=None)
+                            tgt_dataset,
+                            tgt_vocab_table,
+                            sos="<s>",
+                            eos="</s>",
+                            source_reverse=True,
+                            random_seed=285,
+                            src_max_len=300,
+                            tgt_max_len=50,
+                            skip_count=None)
     return iterator
 
+def get_infer_dataset(src_file):
+    src_dataset = tf.data.TextLineDataset(src_file)
+    iterator = get_infer_iterator(src_dataset, source_reverse=False)
+    return iterator
 
 if __name__ == "__main__":
     from utils.vocab_utils import create_tgt_vocab_table
+
     print(tf.__version__)
     import os
+
     # print(os.getcwd())
     base_path = "/home/panxie/Documents/sign-language/nslt/Data"
     src_file = base_path + "/phoenix2014T.train.sign"
     tgt_file = base_path + "/phoenix2014T.train.de"
     tgt_vocab_table = create_tgt_vocab_table(base_path + "/phoenix2014T.vocab.de")
-
-
-
-
+    # dataset = get_train_dataset(src_file, tgt_file, tgt_vocab_table)
+    # cnt = 0
+    # for data in dataset.take(-1):
+    #     cnt += 1
+    #     print(data[0].shape, data[1].shape, data[2].shape, data[3].shape, data[4].shape)
+    # print(cnt)
+    dataset = get_infer_dataset(src_file)
+    cnt = 0
+    for data in dataset.take(-1):
+        cnt += 1
+        print(data[0].shape, data[1].shape)
+    print(cnt)

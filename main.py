@@ -3,12 +3,13 @@ import tensorflow as tf
 from config import Config
 from utils import dataset
 from seq2seq import model
-from utils import vocab_utils
-# from utils.vocab_utils import create_tgt_vocab_table
+from utils import vocab_utils, evaluation_utils, misc_utils
+import time, math
+
 import logging
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 
 def loss_function(y_pred, y):
@@ -28,6 +29,7 @@ def loss_function(y_pred, y):
     loss = tf.reduce_mean(loss)
     return loss
 
+
 config = Config()
 tgt_vocab_size, tgt_vocab_file = vocab_utils.check_vocab(config.tgt_vocab_file,
                                                          "./",
@@ -35,9 +37,22 @@ tgt_vocab_size, tgt_vocab_file = vocab_utils.check_vocab(config.tgt_vocab_file,
                                                          eos="</s>",
                                                          unk=vocab_utils.UNK)
 tgt_vocab_table = vocab_utils.create_tgt_vocab_table(config.tgt_vocab_file)
+word2idx, idx2word = vocab_utils.create_tgt_dict(tgt_vocab_file)
 
 model = model.Model(rnn_units=config.rnn_units, tgt_vocab_size=tgt_vocab_size, tgt_emb_size=config.tgt_emb_size)
 optimizer = tf.keras.optimizers.Adam(lr=config.learning_rate)
+
+checkpointdir = config.output_dir
+chkpoint_prefix = os.path.join(checkpointdir, "checkpoint")
+if not os.path.exists(checkpointdir):
+    os.mkdir(checkpointdir)
+checkpoint = tf.train.Checkpoint(optimizer=optimizer, model=model)
+try:
+    status = checkpoint.restore(tf.train.latest_checkpoint(checkpointdir))
+    print("Checkpoint found at {}".format(tf.train.latest_checkpoint(checkpointdir)))
+except:
+    print("No checkpoint found at {}".format(checkpointdir))
+
 
 # One step of training on a batch using Teacher Forcing technique
 def train_step(batch_data):
@@ -53,39 +68,53 @@ def train_step(batch_data):
     optimizer.apply_gradients(grads_and_vars)
     return loss
 
-checkpointdir = config.output_dir
-chkpoint_prefix = os.path.join(checkpointdir, "checkpoint")
-if not os.path.exists(checkpointdir):
-    os.mkdir(checkpointdir)
-
-checkpoint = tf.train.Checkpoint(optimizer = optimizer, model=model)
-try:
-    status = checkpoint.restore(tf.train.latest_checkpoint(checkpointdir))
-    print("Checkpoint found at {}".format(tf.train.latest_checkpoint(checkpointdir)))
-except:
-    print("No checkpoint found at {}".format(checkpointdir))
-
 
 def eval():
-    eval_dataset = dataset.get_dataset(src_file=config.eval_src_file, tgt_file=config.eval_tgt_file,
-                                       tgt_vocab_table=tgt_vocab_table)
-    for batch_num, batch_data in enumerate(eval_dataset.take(-1)):
-        pass
-
+    eval_dataset = dataset.get_infer_dataset(src_file=config.eval_src_file)
+    with open(config.translation_file, "w") as f:
+        for batch_num, batch_data in enumerate(eval_dataset.take(-1)):
+            src_video, src_len = batch_data
+            predictions = model((src_video, src_len), beam_size=config.beam_size, training=False)
+            predictions = predictions.numpy()
+            print(predictions.shape)
+            for i in range(len(predictions)):
+                pred_sent = [idx2word[idx] for idx in list(predictions[i])]
+                f.write(" ".join(pred_sent) + "\n")
+        bleu_score = evaluation_utils.evaluate(config.eval_tgt_file, config.translation_file, metric="bleu")
+        accuracy = evaluation_utils.evaluate(config.eval_tgt_file, config.translation_file, metric="accuracy")
+    return bleu_score, accuracy
 
 
 def main():
-    train_dataset = dataset.get_dataset(src_file=config.train_src_file, tgt_file=config.train_tgt_file,
-                                        tgt_vocab_table=tgt_vocab_table)
-    for i in range(config.max_epochs):
+    train_dataset = dataset.get_train_dataset(src_file=config.train_src_file, tgt_file=config.train_tgt_file,
+                                              tgt_vocab_table=tgt_vocab_table)
+    init_bleu = 0
+    for epoch in range(config.max_epochs):
         total_loss = 0.0
-        for batch_num, batch_data in enumerate(train_dataset.take(config.steps_per_epoch)):
+        total_cnt = 0
+        step_time = 0
+        for global_step, batch_data in enumerate(train_dataset.take(-1)):
+            start_time = time.time()
+            src_inputs, tgt_input_ids, tgt_output_ids, src_len, tgt_len = batch_data
+            batch_size = src_inputs.shape[0]
             batch_loss = train_step(batch_data)
-            if (batch_num + 1) % 5 == 0:
-                logger.info("total loss: {} epoch {} batch {} ".format(batch_loss.numpy(), i, batch_num + 1))
-                # checkpoint.save(file_prefix=chkpoint_prefix)
-
-
+            total_loss += batch_loss * batch_size
+            total_cnt += batch_size
+            step_time += time.time() - start_time
+            if (global_step + 1) % 100 == 0:
+                train_loss = total_loss / total_cnt
+                train_ppl = misc_utils.safe_exp(total_loss / total_cnt)
+                speed = total_cnt / (1000 * step_time)
+                logger.info("epoch {} global_step {} example-time {:.2f}/1000 total loss: {:.4f} ppl {:.4f}".
+                            format(epoch, global_step + 1, speed, train_loss, train_ppl))
+                if math.isnan(train_ppl):
+                    break
+        bleu_score, accuracy = eval()
+        logger.info("epoch {} accuarcy {:.4f} bleu : {:.4f}".format(epoch, accuracy, bleu_score))
+        if bleu_score > init_bleu:
+            checkpoint.save(file_prefix=chkpoint_prefix + "_bleu_{:.4f}".format(bleu_score))
+            init_bleu = bleu_score
+            logger.info("Currently the best bleu {:.4f}".format(bleu_score))
 
 
 if __name__ == "__main__":
@@ -103,4 +132,4 @@ if __name__ == "__main__":
         except RuntimeError as e:
             # Memory growth must be set before GPUs have been initialized
             print(e)
-    train()
+    main()

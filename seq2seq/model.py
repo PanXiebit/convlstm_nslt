@@ -14,63 +14,123 @@ class Model(tf.keras.Model):
         self.Decoder = Decoder(emb_size=tgt_emb_size, tgt_vocab_size=tgt_vocab_size,
                                rnn_units=rnn_units)
 
-    def call(self, inputs, training=None, mask=None):
+    def call(self, inputs, beam_size=1, training=None, mask=None):
         if training:
             src_inputs, tgt_input_ids, tgt_output_ids, src_len, tgt_len = inputs
             return self.decoder(src_inputs, tgt_input_ids, src_len, tgt_len)
         else:
+            self.beam_size = beam_size
             src_inputs, src_len = inputs
-            return self.argmax_predict(src_inputs, src_len)
+            return self.argmax_predict(src_inputs, src_len, self.beam_size, max_tgt_len=50)
 
     def decoder(self, src_inputs, tgt_input_ids, src_len, tgt_len):
         bs = src_len.shape[0]
         cnn_output = self.cnn_model(src_inputs)  # [batch, compressed_frames, 512]
-        # print("cnn_output shape: ", cnn_output.shape)
 
         enc_output, enc_state = self.Encoder(cnn_output)  # [batch, cp_frames, rnn_units], [batch, rnn_units]
-        # print("enc_output shape:", enc_output.shape)
 
         # decoder embedding
         decoder_emb_inp = self.Decoder.dec_embedding(tgt_input_ids)  # [batch, tgt_len, embed_size]
-        # print("decoder_emb_inp shape:", decoder_emb_inp.shape)
 
         # setting up decoder memory and initial state from enc_output and zero state for AttentionWrapperState
         self.Decoder.attention_mechanism.setup_memory(memory=enc_output,
                                                       memory_sequence_length=src_len)
 
-        decoder_initial_state = self.Decoder.build_decoder_initial_state(batch_size=bs,
-                                                                         enc_state=enc_state,
-                                                                         Dtype=tf.float32)
+        decoder_initial_state = self.Decoder.build_decoder_initial_state(
+            batch_size=bs,
+            enc_state=enc_state,
+            Dtype=tf.float32)
 
-        outputs, _, _ = self.Decoder.decoder(inputs=decoder_emb_inp,
-                                             initial_state=decoder_initial_state,
-                                             sequence_length=tgt_len)
+        outputs, _, _ = self.Decoder.decoder(
+            inputs=decoder_emb_inp,  # BasicDecoder call() function, call dynamic_decoder function
+            initial_state=decoder_initial_state,
+            sequence_length=tgt_len)
         logits = outputs.rnn_output
         return logits
 
-    def argmax_predict(self, src_inputs, src_len, max_tgt_len=50):
-        bs = src_len.shape[0]
+    def argmax_predict(self, src_inputs, src_len, beam_size, max_tgt_len=50):
+        bs = src_inputs.shape[0]
         cnn_output = self.cnn_model(src_inputs)  # [batch, compressed_frames, 512]
-        # print("cnn_output shape: ", cnn_output.shape)
 
         enc_output, enc_state = self.Encoder(cnn_output)  # [batch, cp_frames, rnn_units], [batch, rnn_units]
 
-        decoder_input = tf.expand_dims([EOS_ID] * bs, axis=1)  # [batch, 1]
-        decoder_emb_inp = self.Decoder.dec_embedding(decoder_input)
-        greedy_sampler = tfa.seq2seq.GreedyEmbeddingSampler(embedding_fn=self.Decoder.dec_embedding)
-        greedy_decoder = tfa.seq2seq.BasicDecoder(cell=self.Decoder.rnn_cell,
-                                                  sampler=greedy_sampler,
-                                                  output_layer=self.Decoder.output_layer)
-        self.Decoder.attention_mechanism.setup_memory(enc_output,
-                                                      memory_sequence_length=src_len)
+        if beam_size == 1:
+            decoder_input = tf.expand_dims([EOS_ID] * bs, axis=1)  # [batch, 1]
+            decoder_emb_inp = self.Decoder.dec_embedding(decoder_input)
+            # greedy sample
+            greedy_sampler = tfa.seq2seq.GreedyEmbeddingSampler(embedding_fn=self.Decoder.dec_embedding)
+            # BasicDecoder in greedy sample, use the same rnn_cell with training
+            maximum_iterations = max_tgt_len
+            greedy_decoder_instance = tfa.seq2seq.BasicDecoder(
+                cell=self.Decoder.rnn_cell,
+                sampler=greedy_sampler,
+                output_layer=self.Decoder.output_layer,
+                maximum_iterations=maximum_iterations  # Must be defined here, otherwise it will generate infinitely
+            )
+            # BasicDecoder in greedy sample, use the same attention mechanism with training
+            self.Decoder.attention_mechanism.setup_memory(enc_output,
+                                                          memory_sequence_length=src_len)
+            decoder_initial_state = self.Decoder.build_decoder_initial_state(batch_size=bs,
+                                                                             enc_state=enc_state,
+                                                                             Dtype=tf.float32)
+            start_tokens = tf.fill([bs], SOS_ID)
+            # the first writing
+            outputs, _, _ = greedy_decoder_instance(     # BasicDecoder call() function, call dynamic function
+                inputs=decoder_emb_inp,
+                initial_state=decoder_initial_state,
+                start_tokens=start_tokens,
+                end_token=EOS_ID)
+            return outputs.sample_id
 
-        decoder_initial_state = self.Decoder.build_decoder_initial_state(batch_size=bs,
-                                                                         enc_state=enc_state,
-                                                                         Dtype=tf.float32)
-        maximum_iterations = max_tgt_len
-        start_token = tf.fill([bs], SOS_ID)
+            # the second writing
+            # (first_finished, first_inputs,first_state) = greedy_decoder_instance.initialize(
+            #     self.Decoder.dec_embedding.embeddings,
+            #     start_tokens=start_tokens,
+            #     end_token=EOS_ID,
+            #     initial_state=decoder_initial_state)
+            #
+            # inputs = first_inputs
+            # state = first_state
+            # predictions = np.empty((bs, 0), dtype=np.int32)
+            # for j in range(maximum_iterations):
+            #     outputs, next_state, next_inputs, finished = greedy_decoder_instance.step(j, inputs, state)
+            #     inputs = next_inputs
+            #     state = next_state
+            #     outputs = np.expand_dims(outputs.sample_id, axis=-1)
+            #     predictions = np.append(predictions, outputs, axis=-1)
+            # return predictions
 
-        final_outputs, final_state, final_sequence_lengths = tfa.seq2seq.dynamic_decode(
-            decoder=greedy_decoder,
-            maximum_iterations=maximum_iterations
-        )
+        # beam search
+        else:
+            start_tokens = tf.fill([bs], SOS_ID)
+            end_token = EOS_ID
+            decoder_input = tf.expand_dims([SOS_ID] * bs, 1)
+            decoder_emb_inp = self.Decoder.dec_embedding(decoder_input)
+            tile_memory = tfa.seq2seq.tile_batch(enc_output, beam_size)
+            tile_length = tfa.seq2seq.tile_batch(src_len, beam_size)
+            self.Decoder.attention_mechanism.setup_memory(memory=tile_memory,
+                                                          memory_sequence_length=tile_length)
+            tile_state = tfa.seq2seq.tile_batch(enc_state, beam_size)
+            decoder_initial_state = self.Decoder.rnn_cell.get_initial_state(batch_size=bs * beam_size,
+                                                                            dtype=tf.float32)
+            decoder_initial_state = decoder_initial_state.clone(tile_state)
+            beam_decoder_instance = tfa.seq2seq.BeamSearchDecoder(
+                cell=self.Decoder.rnn_cell,
+                beam_width=beam_size,
+                embedding_fn=self.Decoder.dec_embedding.embeddings,
+                output_layer=self.Decoder.output_layer,
+                maximum_iterations=max_tgt_len
+            )
+            outputs, _, _ = beam_decoder_instance(  # BasicDecoder call() function, call dynamic function
+                inputs=decoder_emb_inp,
+                initial_state=decoder_initial_state,
+                start_tokens=start_tokens,
+                end_token=EOS_ID)
+
+if __name__ == "__main__":
+    src = tf.random.normal((5, 10, 32, 32, 3))
+    src_len = [5, 6, 7, 8, 9]
+    model = Model(rnn_units=64, tgt_vocab_size=2000, tgt_emb_size=300)
+    out = model(inputs=(src, src_len), beam_size=1, training=False)
+    print(out.shape)
+    # tfa.seq2seq.dynamic_decode()
