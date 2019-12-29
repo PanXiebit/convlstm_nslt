@@ -13,16 +13,16 @@ logger = logging.getLogger(__name__)
 
 
 def loss_function(y_pred, y):
-    # shape of y [batch_size, ty]
-    # shape of y_pred [batch_size, Ty, output_vocab_size]
+    """
+
+    :param y_pred:  [batch_size, ty]
+    :param y:  [batch_size, Ty, output_vocab_size]
+    :return:
+    """
     sparsecategoricalcrossentropy = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True,
                                                                                   reduction='none')
     loss = sparsecategoricalcrossentropy(y_true=y, y_pred=y_pred)
-    # skip loss calculation for padding sequences i.e. y = 0
-    # [ <start>,How, are, you, today, 0, 0, 0, 0 ....<end>]
-    # [ 1, 234, 3, 423, 3344, 0, 0 ,0 ,0, 2 ]
-    # y is a tensor of [batch_size,Ty] . Create a mask when [y=0]
-    # mask the loss when padding sequence appears in the output sequence
+
     mask = tf.logical_not(tf.math.equal(y, 0))  # output 0 for y=0 else output 1
     mask = tf.cast(mask, dtype=loss.dtype)
     loss = mask * loss
@@ -61,7 +61,6 @@ def train_step(batch_data):
     with tf.GradientTape() as tape:
         logits = model(batch_data, training=True)
         loss = loss_function(logits, tgt_output_ids)
-
     variables = model.trainable_variables
     gradients = tape.gradient(target=loss, sources=variables)
     grads_and_vars = zip(gradients, variables)
@@ -76,7 +75,6 @@ def eval():
             src_video, src_len = batch_data
             predictions = model((src_video, src_len), beam_size=config.beam_size, training=False)
             predictions = predictions.numpy()
-            print(predictions.shape)
             for i in range(len(predictions)):
                 pred_sent = [idx2word[idx] for idx in list(predictions[i])]
                 f.write(" ".join(pred_sent) + "\n")
@@ -104,8 +102,8 @@ def main():
             if (global_step + 1) % 100 == 0:
                 train_loss = total_loss / total_cnt
                 train_ppl = misc_utils.safe_exp(total_loss / total_cnt)
-                speed = total_cnt / (1000 * step_time)
-                logger.info("epoch {} global_step {} example-time {:.2f}/1000 total loss: {:.4f} ppl {:.4f}".
+                speed = total_cnt / step_time
+                logger.info("epoch {} global_step {} example-time {:.2f} total loss: {:.4f} ppl {:.4f}".
                             format(epoch, global_step + 1, speed, train_loss, train_ppl))
                 if math.isnan(train_ppl):
                     break

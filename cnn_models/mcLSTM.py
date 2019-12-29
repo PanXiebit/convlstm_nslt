@@ -1,3 +1,7 @@
+"""
+reference:  https://github.com/irhum/R2Plus1D-PyTorch/blob/master/network.py
+"""
+
 import tensorflow as tf
 import math
 from cnn_models.modules.SpatioTemporalModule import SpatioTemporalResLayer, SpatioTemporalResBlock, SpatioTemporalConv
@@ -25,7 +29,7 @@ class Mclstm(tf.keras.Model):
         # first conv, with stride 1x2x2 and kernel size 3x7x7
         self.st_conv1 = SpatioTemporalConv(3, init_kernel, kernel_size=(7, 7, 7), stride=[1, 2, 2], padding="same")
         # output of conv2 is same size as of conv1, no downsampling needed. kernel_size 3x3x3
-        # self.conv2 = SpatioTemporalResLayer(64, 64, 3, layer_sizes[0], block_type=block_type, downsample=False)  # resnet18 is False
+        # self.st_conv2 = SpatioTemporalResLayer(init_kernel, init_kernel, 3, layer_sizes[0], block_type=st_block_type, downsample=False)  # resnet18 is False
         self.st_conv2 = SpatioTemporalResLayer(init_kernel, init_kernel, 3, layer_sizes[0], block_type=st_block_type, downsample=True)
         # each of the final three layers doubles num_channels, while performing downsampling
         # inside the first block
@@ -64,7 +68,8 @@ class Mclstm(tf.keras.Model):
         x = self.pool(x)
         # print("pooling: out_shape = ", x.shape)
 
-        return tf.reshape(x, (bs, t, self.init_kernel * 8))   # donnot support model.summary
+        return tf.reshape(x, (bs, t, self.init_kernel * 8)), t   # donnot support model.summary
+        # return tf.reshape(x, (-1, self.init_kernel * 8)), t
 
 if __name__ == "__main__":
     model = Mclstm(res_n=18)

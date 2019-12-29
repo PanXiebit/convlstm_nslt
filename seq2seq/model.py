@@ -21,12 +21,12 @@ class Model(tf.keras.Model):
         else:
             self.beam_size = beam_size
             src_inputs, src_len = inputs
-            return self.argmax_predict(src_inputs, src_len, self.beam_size, max_tgt_len=50)
+            return self.argmax_predict(src_inputs, src_len, self.beam_size)
 
     def decoder(self, src_inputs, tgt_input_ids, src_len, tgt_len):
         bs = src_len.shape[0]
-        cnn_output = self.cnn_model(src_inputs)  # [batch, compressed_frames, 512]
-
+        cnn_output, hidden_frame = self.cnn_model(src_inputs)  # [batch, compressed_frames, 512]
+        # print("hidden_frame", hidden_frame)
         enc_output, enc_state = self.Encoder(cnn_output)  # [batch, cp_frames, rnn_units], [batch, rnn_units]
 
         # decoder embedding
@@ -48,9 +48,10 @@ class Model(tf.keras.Model):
         logits = outputs.rnn_output
         return logits
 
-    def argmax_predict(self, src_inputs, src_len, beam_size, max_tgt_len=50):
+    def argmax_predict(self, src_inputs, src_len, beam_size):
         bs = src_inputs.shape[0]
-        cnn_output = self.cnn_model(src_inputs)  # [batch, compressed_frames, 512]
+        cnn_output, hidden_frame = self.cnn_model(src_inputs)  # [batch, compressed_frames, 512]
+        # print("hidden_frame", hidden_frame)
 
         enc_output, enc_state = self.Encoder(cnn_output)  # [batch, cp_frames, rnn_units], [batch, rnn_units]
 
@@ -60,7 +61,7 @@ class Model(tf.keras.Model):
             # greedy sample
             greedy_sampler = tfa.seq2seq.GreedyEmbeddingSampler(embedding_fn=self.Decoder.dec_embedding)
             # BasicDecoder in greedy sample, use the same rnn_cell with training
-            maximum_iterations = max_tgt_len
+            maximum_iterations = hidden_frame + 10
             greedy_decoder_instance = tfa.seq2seq.BasicDecoder(
                 cell=self.Decoder.rnn_cell,
                 sampler=greedy_sampler,
@@ -75,7 +76,7 @@ class Model(tf.keras.Model):
                                                                              Dtype=tf.float32)
             start_tokens = tf.fill([bs], SOS_ID)
             # the first writing
-            outputs, _, _ = greedy_decoder_instance(     # BasicDecoder call() function, call dynamic function
+            outputs, _, _ = greedy_decoder_instance(  # BasicDecoder call() function, call dynamic function
                 inputs=decoder_emb_inp,
                 initial_state=decoder_initial_state,
                 start_tokens=start_tokens,
@@ -119,13 +120,14 @@ class Model(tf.keras.Model):
                 beam_width=beam_size,
                 embedding_fn=self.Decoder.dec_embedding.embeddings,
                 output_layer=self.Decoder.output_layer,
-                maximum_iterations=max_tgt_len
+                maximum_iterations=hidden_frame + 10
             )
             outputs, _, _ = beam_decoder_instance(  # BasicDecoder call() function, call dynamic function
                 inputs=decoder_emb_inp,
                 initial_state=decoder_initial_state,
                 start_tokens=start_tokens,
                 end_token=EOS_ID)
+
 
 if __name__ == "__main__":
     src = tf.random.normal((5, 10, 32, 32, 3))
