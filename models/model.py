@@ -1,6 +1,6 @@
 import tensorflow as tf
 from cnn_models.mcLSTM import Mclstm
-from seq2seq.modules.encoder_decoder import Encoder, Decoder
+from models.modules.rnn_seq2seq import Encoder, Decoder
 from utils.vocab_utils import EOS_ID, SOS_ID
 import tensorflow_addons as tfa
 
@@ -56,7 +56,7 @@ class Model(tf.keras.Model):
         enc_output, enc_state = self.Encoder(cnn_output)  # [batch, cp_frames, rnn_units], [batch, rnn_units]
 
         if beam_size == 1:
-            decoder_input = tf.expand_dims([EOS_ID] * bs, axis=1)  # [batch, 1]
+            decoder_input = tf.expand_dims([SOS_ID] * bs, axis=1)  # [batch, 1]
             decoder_emb_inp = self.Decoder.dec_embedding(decoder_input)
             # greedy sample
             greedy_sampler = tfa.seq2seq.GreedyEmbeddingSampler(embedding_fn=self.Decoder.dec_embedding)
@@ -81,7 +81,7 @@ class Model(tf.keras.Model):
                 initial_state=decoder_initial_state,
                 start_tokens=start_tokens,
                 end_token=EOS_ID)
-            return outputs.sample_id
+            return outputs.rnn_output
 
             # the second writing
             # (first_finished, first_inputs,first_state) = greedy_decoder_instance.initialize(
@@ -135,4 +135,7 @@ if __name__ == "__main__":
     model = Model(rnn_units=64, tgt_vocab_size=2000, tgt_emb_size=300)
     out = model(inputs=(src, src_len), beam_size=1, training=False)
     print(out.shape)
-    # tfa.seq2seq.dynamic_decode()
+
+    # for param in model.trainable_variables:
+    #     print(param.name, param.shape)
+    # tfa.models.dynamic_decode()

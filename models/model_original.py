@@ -6,7 +6,7 @@ from cnn_models.mcLSTM import Mclstm
 import abc
 
 import tensorflow as tf
-from seq2seq.modules import model_helper
+from models.modules import model_helper
 import tensorflow_addons as tfa
 from utils import misc_utils as utils
 

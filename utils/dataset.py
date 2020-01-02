@@ -150,6 +150,7 @@ def get_iterator(src_dataset,
                  eos,
                  source_reverse,
                  random_seed,
+                 batch_size=301,
                  src_max_len=None,
                  tgt_max_len=None,
                  num_parallel_calls=None,
@@ -205,6 +206,7 @@ def get_iterator(src_dataset,
                                           (src, tgt_in, tgt_out, src_len, tf.size(tgt_in)),
                                           num_parallel_calls=num_parallel_calls)  # src_path, tgt_in_ids, tgt_out_ids, src_len, tgt_len
 
+    # Read video, transfer video path to tensor
     src_tgt_dataset = src_tgt_dataset.map(lambda src, tgt_in, tgt_out, src_len, tgt_len:
                                           (tf.py_function(read_video, [src, source_reverse], tf.float32),
                                            tgt_in, tgt_out, src_len, tgt_len),
@@ -214,7 +216,7 @@ def get_iterator(src_dataset,
     #                                                padded_shapes=([None, None, None, None],
     #                                                               [None],[None], [], []))
 
-    src_tgt_dataset = _batch_examples(src_tgt_dataset, batch_size=301, src_max_length=300)
+    src_tgt_dataset = _batch_examples(src_tgt_dataset, batch_size=batch_size, src_max_length=300)
 
     src_tgt_dataset = src_tgt_dataset.repeat(count=1)
 
@@ -234,13 +236,43 @@ def get_infer_iterator(src_dataset, source_reverse):
     src_dataset = src_dataset.map(lambda src, src_len:
                                   (tf.py_function(read_video, [src, source_reverse], tf.float32),
                                    tf.reshape(src_len, [1])))
-    src_dataset = src_dataset.map(lambda  src, src_len: (tf.expand_dims(src, axis=0), src_len))
+    src_dataset = src_dataset.map(lambda src, src_len: (tf.expand_dims(src, axis=0), src_len))
 
     src_dataset = src_dataset.repeat(1)
     return src_dataset
 
 
-def get_train_dataset(src_file, tgt_file, tgt_vocab_table):
+def get_infer_iterator_2(src_dataset, tgt_dataset, tgt_vocab_table, source_reverse, num_parallel_calls=None):
+    # Get number of Frames
+    src_tgt_dataset = tf.data.Dataset.zip((src_dataset, tgt_dataset))
+    # Get number of frames from videos
+    src_tgt_dataset = src_tgt_dataset.map(
+        lambda src, tgt: (src, tgt, tf.py_function(get_number_of_frames, [src], tf.int32)),
+        num_parallel_calls=num_parallel_calls)  # src_path, tgt_string, src_len
+    # Split Translation into Tokens
+    src_tgt_dataset = src_tgt_dataset.map(lambda src, tgt, src_len:
+                                          (src, tf.strings.split([tgt]).values, src_len),
+                                          num_parallel_calls=num_parallel_calls)  # src_path, tgt_tokens, src_len
+    # Convert Tokens to IDs
+    src_tgt_dataset = src_tgt_dataset.map(lambda src, tgt, src_len:
+                                          (src, tf.cast(tgt_vocab_table.lookup(tgt), tf.int32), src_len),
+                                          num_parallel_calls=num_parallel_calls)  # src_path, tgt_ids, src_len
+
+    # Get Target Sequence Length
+    src_tgt_dataset = src_tgt_dataset.map(lambda src, tgt, src_len:
+                                          (src, tgt, src_len, tf.size(tgt)),
+                                          num_parallel_calls=num_parallel_calls)  # src_path, tgt_in_ids, tgt_out_ids, src_len, tgt_len
+
+    src_tgt_dataset = src_tgt_dataset.map(lambda src, tgt, src_len, tgt_len:
+                                  (tf.py_function(read_video, [src, source_reverse], tf.float32), tgt,
+                                   tf.reshape(src_len, [1]), tf.reshape(tgt_len, [1])))
+    src_tgt_dataset = src_tgt_dataset.map(lambda src, tgt, src_len, tgt_len: (tf.expand_dims(src, axis=0), tf.expand_dims(tgt, axis=0), src_len, tgt_len))
+
+    src_tgt_dataset = src_tgt_dataset.repeat(1)
+    return src_tgt_dataset
+
+
+def get_train_dataset(src_file, tgt_file, tgt_vocab_table, batch_size=301):
     src_dataset = tf.data.TextLineDataset(src_file)
     tgt_dataset = tf.data.TextLineDataset(tgt_file)
 
@@ -249,6 +281,7 @@ def get_train_dataset(src_file, tgt_file, tgt_vocab_table):
                             tgt_vocab_table,
                             sos="<s>",
                             eos="</s>",
+                            batch_size=batch_size,
                             source_reverse=True,
                             random_seed=285,
                             src_max_len=300,
@@ -256,9 +289,11 @@ def get_train_dataset(src_file, tgt_file, tgt_vocab_table):
                             skip_count=None)
     return iterator
 
-def get_infer_dataset(src_file):
+def get_infer_dataset(src_file, tgt_file, tgt_vocab_table, source_reverse=False):
     src_dataset = tf.data.TextLineDataset(src_file)
-    iterator = get_infer_iterator(src_dataset, source_reverse=False)
+    tgt_dataset = tf.data.TextLineDataset(tgt_file)
+
+    iterator = get_infer_iterator_2(src_dataset, tgt_dataset, tgt_vocab_table, source_reverse=source_reverse)
     return iterator
 
 if __name__ == "__main__":
@@ -269,8 +304,8 @@ if __name__ == "__main__":
 
     # print(os.getcwd())
     base_path = "/home/panxie/Documents/sign-language/nslt/Data"
-    src_file = base_path + "/phoenix2014T.train.sign"
-    tgt_file = base_path + "/phoenix2014T.train.de"
+    src_file = base_path + "/phoenix2014T.test.sign"
+    tgt_file = base_path + "/phoenix2014T.test.de"
     tgt_vocab_table = create_tgt_vocab_table(base_path + "/phoenix2014T.vocab.de")
     # dataset = get_train_dataset(src_file, tgt_file, tgt_vocab_table)
     # cnt = 0
@@ -278,9 +313,9 @@ if __name__ == "__main__":
     #     cnt += 1
     #     print(data[0].shape, data[1].shape, data[2].shape, data[3].shape, data[4].shape)
     # print(cnt)
-    dataset = get_infer_dataset(src_file)
+    dataset = get_infer_dataset(src_file, tgt_file, tgt_vocab_table)
     cnt = 0
     for data in dataset.take(-1):
         cnt += 1
-        print(data[0].shape, data[1].shape)
-    print(cnt)
+        print(data[0].shape, data[1].shape, data[2].shape, data[3].shape)
+        print(cnt)

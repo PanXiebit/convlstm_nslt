@@ -68,8 +68,7 @@ def _bleu(ref_file, trans_file, bpe_delimiter=None):
         ref_files = [ref_file]
         reference_text = []
         for reference_filename in ref_files:
-            with codecs.getreader("utf-8")(
-                    tf.io.gfile.GFile(reference_filename, "rb")) as fh:
+            with codecs.getreader("utf-8")(tf.io.gfile.GFile(reference_filename, "rb")) as fh:
                 reference_text.append(fh.readlines())
 
         per_segment_references = []
