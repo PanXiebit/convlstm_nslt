@@ -6,15 +6,17 @@ import tensorflow_addons as tfa
 
 
 class ModelResNet(tf.keras.Model):
-    def __init__(self, rnn_units, tgt_emb_size, tgt_vocab_size):
+    def __init__(self, tgt_emb_size, tgt_vocab_size, rnn_units, unit_type, num_layers, residual, init_op, dropout, training,
+                 forget_bias):
         super(ModelResNet, self).__init__()
 
         self.cnn_model = ResNet(layer_num=18, include_top=True)
         self.cnn_model.build((None,) + (112, 112, 3))
         self.cnn_model.load_weights("/home/panxie/Documents/sign-language/nslt/BaseModel/ResNet_18.h5")
-        self.Encoder = Encoder(enc_units=rnn_units)
-        self.Decoder = Decoder(emb_size=tgt_emb_size, tgt_vocab_size=tgt_vocab_size,
-                               rnn_units=rnn_units)
+        self.Encoder = Encoder(rnn_units, unit_type, num_layers, residual, init_op, dropout, training,
+                               forget_bias)
+        self.Decoder = Decoder(tgt_emb_size, tgt_vocab_size, rnn_units, unit_type, num_layers, residual, init_op, dropout, training,
+                               forget_bias)
 
     def call(self, inputs, beam_size=1, training=None, mask=None):
         if training:
@@ -141,7 +143,8 @@ class ModelResNet(tf.keras.Model):
             # the first writing
             start_tokens = tf.fill([bs], SOS_ID)
             outputs, _, _ = beam_decoder_instance(  # BasicDecoder call() function, call dynamic function
-                self.Decoder.dec_embedding.embeddings,  # the inputs parameter in source code of BeamserchDecoder is embedding.
+                self.Decoder.dec_embedding.embeddings,
+                # the inputs parameter in source code of BeamserchDecoder is embedding.
                 initial_state=decoder_initial_state,
                 start_tokens=start_tokens,
                 end_token=EOS_ID)
@@ -173,14 +176,16 @@ class ModelResNet(tf.keras.Model):
             # print(predictions.shape)
             # print(beam_scores.shape)
 
+
 if __name__ == "__main__":
     import numpy as np
     import itertools
+
     src = tf.random.normal((5, 10, 32, 32, 3))
     # src_len = np.array([[5],[6],[7],[8],[9]])
     src_len = np.array([5, 6, 7, 8, 9])
     src_len = tf.convert_to_tensor(src_len)
-    model = ModelResNet(rnn_units=64, tgt_vocab_size=2000, tgt_emb_size=300)
+    model = ModelResNet(tgt_vocab_size=2000, tgt_emb_size=300, rnn_units=64)
     # beam_scores, beam_predictions = model(inputs=(src, src_len), beam_size=3, training=False)
     # bs, _, beam_size = beam_scores.shape
     # beam_scores = tf.reshape(beam_scores, (bs, beam_size, -1)).numpy()
@@ -197,6 +202,4 @@ if __name__ == "__main__":
     #         # print(" ".join([Y_tokenizer.index_word[w] for w in seq]), " beam score: ", beam_score)
     #         print(seq, beam_score)
 
-    # for param in model.trainable_variables:
-    #     print(param.name, param.shape)
-    # tfa.models.dynamic_decode()
+

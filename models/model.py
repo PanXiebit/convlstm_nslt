@@ -104,7 +104,6 @@ class Model(tf.keras.Model):
         # beam search
         else:
             start_tokens = tf.fill([bs], SOS_ID)
-            end_token = EOS_ID
             decoder_input = tf.expand_dims([SOS_ID] * bs, 1)
             decoder_emb_inp = self.Decoder.dec_embedding(decoder_input)
             tile_memory = tfa.seq2seq.tile_batch(enc_output, beam_size)

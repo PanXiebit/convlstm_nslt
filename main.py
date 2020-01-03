@@ -13,24 +13,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-# def loss_function(y_pred, y):
-#     """
-#
-#     :param y:  [batch_size, tgt_len]
-#     :param y_pred:  [batch_size, tgt_len, output_vocab_size]
-#     :return:
-#     """
-#     sparsecategoricalcrossentropy = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True,
-#                                                                                   reduction='none')
-#
-#     loss = sparsecategoricalcrossentropy(y_true=y, y_pred=y_pred)
-#
-#     mask = tf.logical_not(tf.math.equal(y, 0))  # output 0 for y=0 else output 1
-#     mask = tf.cast(mask, dtype=loss.dtype)
-#     loss = mask * loss
-#     loss = tf.reduce_mean(loss)
-#     return loss
-
 def get_learning_rate(learning_rate, hidden_size, learning_rate_warmup_steps, global_step):
     with tf.name_scope("learning_rate"):
         warmup_steps = tf.cast(learning_rate_warmup_steps, tf.float32)
@@ -39,6 +21,7 @@ def get_learning_rate(learning_rate, hidden_size, learning_rate_warmup_steps, gl
         learning_rate *= tf.minimum(1.0, step / warmup_steps)
         learning_rate *= tf.math.rsqrt(tf.maximum(step, warmup_steps))
         return learning_rate
+
 
 config = Config()
 tgt_vocab_size, tgt_vocab_file = vocab_utils.check_vocab(config.tgt_vocab_file,
@@ -50,20 +33,28 @@ tgt_vocab_table = vocab_utils.create_tgt_vocab_table(config.tgt_vocab_file)
 word2idx, idx2word = vocab_utils.create_tgt_dict(tgt_vocab_file)
 
 # model = Model(rnn_units=config.rnn_units, tgt_vocab_size=tgt_vocab_size, tgt_emb_size=config.tgt_emb_size)
-model = ModelResNet(rnn_units=config.rnn_units, tgt_vocab_size=tgt_vocab_size, tgt_emb_size=config.tgt_emb_size)
+train_model = ModelResNet(tgt_vocab_size=tgt_vocab_size, tgt_emb_size=config.tgt_emb_size,
+                          rnn_units=config.rnn_units, unit_type=config.unit_type,
+                          num_layers=config.num_layers, residual=config.residual,
+                          init_op=config.init_op, dropout=config.dropout, training=True,
+                          forget_bias=config.forget_bias)
+eval_model =  ModelResNet(tgt_vocab_size=tgt_vocab_size, tgt_emb_size=config.tgt_emb_size,
+                          rnn_units=config.rnn_units, unit_type=config.unit_type,
+                          num_layers=config.num_layers, residual=config.residual,
+                          init_op=config.init_op, dropout=0.0, training=False,
+                          forget_bias=config.forget_bias)
+
+# for param_1, param_2 in zip(train_model.trainable_variables, eval_model.trainable_variables):
+#     print(param_1.name, "==", param_2.name)
+#
+# exit()
 
 checkpointdir = config.output_dir
 if tf.train.latest_checkpoint(checkpointdir) is not None:
-    # global_step = tf.Variable(initial_value=int(tf.train.latest_checkpoint(checkpointdir).split("-")[-1]),
-    #                           trainable=False, dtype=tf.int32)
-    global_step = int(tf.train.latest_checkpoint(checkpointdir).split("-")[-1])
+    # checkpoint_bleu_0.0428-5024-1.data-00000-of-00002
+    global_step = int(tf.train.latest_checkpoint(checkpointdir).split("-")[2])
 else:
-    # global_step = tf.Variable(initial_value=0, trainable=False, dtype=tf.int32)
     global_step = 0
-
-# optimizer = lr_schedule.create_optimizer(init_lr=config.learning_rate,
-#                                          num_train_steps=global_step,
-#                                          num_warmup_steps=1000)
 
 lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
     config.learning_rate,
@@ -74,29 +65,31 @@ lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
 optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
 
 chkpoint_prefix = os.path.join(checkpointdir, "checkpoint")
+
 if not os.path.exists(checkpointdir):
     os.mkdir(checkpointdir)
-checkpoint = tf.train.Checkpoint(optimizer=optimizer, model=model)
+checkpoint = tf.train.Checkpoint(optimizer=optimizer, model=train_model)
 try:
     status = checkpoint.restore(tf.train.latest_checkpoint(checkpointdir))
     logger.info("======== Checkpoint found at {} ======".
                 format(tf.train.latest_checkpoint(checkpointdir)))
 except:
     logger.info("======== No checkpoint found at {} ======".format(checkpointdir))
-    global_step = 0
 
 
 # One step of training on a batch using Teacher Forcing technique
+# use the @tf.function decorator to take advance of static graph computation (remove it when you want to debug)
+# @tf.function
 def train_step(batch_data):
     src_inputs, tgt_input_ids, tgt_output_ids, src_len, tgt_len = batch_data
     loss = 0
     with tf.GradientTape() as tape:
-        logits = model(batch_data, training=True)
+        logits = train_model(batch_data, training=True)
         # loss = loss_function(logits, tgt_output_ids)
         xentropy, weights = metrics.padded_cross_entropy_loss(logits, tgt_output_ids,
                                                               config.label_smoothing, vocab_size=tgt_vocab_size)
         loss = tf.reduce_sum(xentropy) / tf.reduce_sum(weights)
-    variables = model.Encoder.trainable_variables + model.Decoder.trainable_variables
+    variables = train_model.Encoder.trainable_variables + train_model.Decoder.trainable_variables
     # for param in variables:
     #     logger.info("{}, {}".format(param.name, param.shape))
     gradients = tape.gradient(target=loss, sources=variables)
@@ -112,7 +105,7 @@ def eval():
     total_cnt, total_loss, total_bleu = 0.0, 0.0, 0.0
     for batch_num, batch_data in enumerate(dev_dataset.take(config.debug_num)):
         src_inputs, tgt_input_ids, tgt_output_ids, src_len, tgt_len = batch_data
-        logits = model(batch_data, training=True)
+        logits = eval_model(batch_data, training=True)
         bs = logits.shape[0]
         xentropy, weights = metrics.padded_cross_entropy_loss(logits, tgt_output_ids,
                                                               config.label_smoothing, vocab_size=tgt_vocab_size)
@@ -127,21 +120,6 @@ def eval():
     return eval_bleu, eval_loss
 
 
-# def infer():
-#     """External evaluation"""
-#     infer_dataset = dataset.get_infer_dataset(src_file=config.test_src_file)
-#     with open(config.translation_file, "w") as f:
-#         for batch_num, batch_data in enumerate(infer_dataset.take(-1)):
-#             src_video, src_len = batch_data
-#             predictions = model((src_video, src_len), beam_size=config.beam_size, training=False)
-#             predictions = predictions.numpy()
-#             for i in range(len(predictions)):
-#                 pred_sent = [idx2word[idx] for idx in list(predictions[i])]
-#                 f.write(" ".join(pred_sent) + "\n")
-#     bleu_score = evaluation_utils.evaluate(config.test_tgt_file, config.translation_file, metric="bleu")
-#     accuracy = evaluation_utils.evaluate(config.test_tgt_file, config.translation_file, metric="accuracy")
-#     return bleu_score, accuracy
-
 def infer():
     """External evaluation"""
     infer_dataset = dataset.get_infer_dataset(src_file=config.test_src_file, tgt_file=config.test_tgt_file,
@@ -149,7 +127,7 @@ def infer():
     total_cnt, total_loss, total_bleu = 0.0, 0.0, 0.0
     for batch_num, batch_data in enumerate(infer_dataset.take(config.debug_num)):
         src, tgt, src_len, tgt_len = batch_data
-        pred_logits = model((src, src_len), beam_size=config.beam_size, training=False)
+        pred_logits = eval_model((src, src_len), beam_size=config.beam_size, training=False)
         bs = pred_logits.shape[0]
         # xentropy, weights = metrics.padded_cross_entropy_loss(pred_logits, tgt,
         #                                                       config.label_smoothing, vocab_size=tgt_vocab_size)
@@ -164,7 +142,8 @@ def infer():
             label = tgt[0].numpy()
             pred_sent = [idx2word[idx] for idx in list(predictions)]
             label_sent = [idx2word[idx] for idx in list(label)]
-            logger.info("reference sentences: {},\n predicted senteces: {}".format(" ".join(label_sent), " ".join(pred_sent)))
+            logger.info("\n reference sentences: {} \n predicted senteces: {}".format(" ".join(label_sent),
+                                                                                      " ".join(pred_sent)))
     # test_loss = total_loss / total_cnt
     test_bleu = total_bleu / total_cnt
     # return test_bleu, test_loss
@@ -186,7 +165,7 @@ def main(global_step=global_step):
     else:
         for epoch in range(config.max_epochs):
             total_loss, total_cnt, step_time = 0.0, 0.0, 0.0
-            for batch_data in train_dataset.take(config.debug_num):
+            for batch_data in train_dataset.take(2500):
                 start_time = time.time()
                 src_inputs, tgt_input_ids, tgt_output_ids, src_len, tgt_len = batch_data
                 batch_size = src_inputs.shape[0]
