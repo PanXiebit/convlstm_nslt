@@ -22,8 +22,6 @@ from os import listdir
 from os.path import isfile, join
 import numpy as np
 import cv2
-from config import FLAGS
-
 
 import tensorflow as tf
 
@@ -49,7 +47,7 @@ def read_video(src, source_reverse):
     src = src.numpy()
     images = sorted([f for f in listdir(src) if isfile(join(src, f))])
     # video = np.zeros((len(images), 227, 227, 3)).astype(np.float32)
-    video = np.zeros((len(images),) + FLAGS.input_shape + (3,)).astype(np.float32)
+    video = np.zeros((len(images), 156, 156, 3)).astype(np.float32)
 
     # Cihan_CR: Harcoded Path, Need to Change This
     mean_image = np.load('/home/panxie/Documents/sign-language/nslt/Mean/'
@@ -58,8 +56,8 @@ def read_video(src, source_reverse):
     # for each image
     for i in range(0, len(images)):
         img_path = str(src + images[i], encoding="utf-8")
-        video[i, :, :, :] = cv2.resize(cv2.imread(img_path), FLAGS.input_shape).astype(np.float32) - \
-                            cv2.resize(mean_image, FLAGS.input_shape)
+        video[i, :, :, :] = cv2.resize(cv2.imread(img_path), (156, 156)).astype(np.float32) - \
+                            cv2.resize(mean_image, (156, 156))
 
     if source_reverse:
         video = np.flip(video, axis=0)
@@ -315,9 +313,9 @@ if __name__ == "__main__":
     #     cnt += 1
     #     print(data[0].shape, data[1].shape, data[2].shape, data[3].shape, data[4].shape)
     # print(cnt)
-    dataset = get_train_dataset(src_file, tgt_file, tgt_vocab_table)
+    dataset = get_infer_dataset(src_file, tgt_file, tgt_vocab_table)
     cnt = 0
     for data in dataset.take(-1):
         cnt += 1
         print(data[0].shape, data[1].shape, data[2].shape, data[3].shape)
-        # print(cnt)
+        print(cnt)

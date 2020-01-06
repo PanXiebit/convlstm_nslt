@@ -1,6 +1,5 @@
 import tensorflow as tf
 from cnn_models.resnet import ResNet
-from cnn_models.alexnet import AlexNet
 from models.modules.rnn_seq2seq import Encoder, Decoder
 from utils.vocab_utils import EOS_ID, SOS_ID
 import tensorflow_addons as tfa
@@ -11,13 +10,9 @@ class ModelResNet(tf.keras.Model):
                  forget_bias):
         super(ModelResNet, self).__init__()
 
-        # self.cnn_model = ResNet(layer_num=18, include_top=True)
-        self.cnn_model = AlexNet(dropout_rate=dropout,
-                                 weights_path="/home/panxie/Documents/sign-language/nslt/BaseModel/bvlc_alexnet.npy")
-        self.cnn_model.build((None,) + input_shape + (3,))
-        # self.cnn_model.load_weights("/home/panxie/Documents/sign-language/nslt/BaseModel/ResNet_18.h5")
-        self.cnn_model.load_weights()
-
+        self.cnn_model = ResNet(layer_num=18, include_top=True)
+        self.cnn_model.build((None,) + input_shape)
+        self.cnn_model.load_weights("/home/panxie/Documents/sign-language/nslt/BaseModel/ResNet_18.h5")
         self.Encoder = Encoder(rnn_units, unit_type, num_layers, residual, init_op, dropout, training,
                                forget_bias)
         self.Decoder = Decoder(tgt_emb_size, tgt_vocab_size, rnn_units, unit_type, num_layers, residual, init_op, dropout, training,
@@ -35,7 +30,7 @@ class ModelResNet(tf.keras.Model):
     def decoder(self, src_inputs, tgt_input_ids, src_len, tgt_len, training):
         bs, num_frames, h, w, c = src_inputs.shape
         src_inputs = tf.reshape(src_inputs, (bs * num_frames, h, w, c))
-        cnn_output = self.cnn_model(src_inputs, training=training)  # [batch, compressed_frames, 512]
+        cnn_output, _ = self.cnn_model(src_inputs)  # [batch, compressed_frames, 512]
         cnn_output = tf.reshape(cnn_output, (bs, num_frames, -1))
         # print("hidden_frame", hidden_frame)
         enc_output, enc_state = self.Encoder(cnn_output, training=training)  # [batch, cp_frames, rnn_units], [batch, rnn_units]
@@ -67,7 +62,7 @@ class ModelResNet(tf.keras.Model):
 
         bs, hidden_frame, h, w, c = src_inputs.shape
         src_inputs = tf.reshape(src_inputs, (bs * hidden_frame, h, w, c))
-        cnn_output = self.cnn_model(src_inputs, training=training)  # [batch, compressed_frames, 512]
+        cnn_output, _ = self.cnn_model(src_inputs)  # [batch, compressed_frames, 512]
         cnn_output = tf.reshape(cnn_output, (bs, hidden_frame, -1))
 
         enc_output, enc_state = self.Encoder(cnn_output)  # [batch, cp_frames, rnn_units], [batch, rnn_units]
@@ -103,24 +98,6 @@ class ModelResNet(tf.keras.Model):
                 end_token=EOS_ID,
                 training=training)
             return outputs.rnn_output
-
-            # the second writing
-            # (first_finished, first_inputs,first_state) = greedy_decoder_instance.initialize(
-            #     self.Decoder.dec_embedding.embeddings,
-            #     start_tokens=start_tokens,
-            #     end_token=EOS_ID,
-            #     initial_state=decoder_initial_state)
-            #
-            # inputs = first_inputs
-            # state = first_state
-            # predictions = np.empty((bs, 0), dtype=np.int32)
-            # for j in range(maximum_iterations):
-            #     outputs, next_state, next_inputs, finished = greedy_decoder_instance.step(j, inputs, state)
-            #     inputs = next_inputs
-            #     state = next_state
-            #     outputs = np.expand_dims(outputs.sample_id, axis=-1)
-            #     predictions = np.append(predictions, outputs, axis=-1)
-            # return predictions
 
         # beam search
         else:
@@ -159,30 +136,6 @@ class ModelResNet(tf.keras.Model):
             beam_predictions = outputs.beam_search_decoder_output.predicted_ids
             return beam_predictions[:, :, 0]
 
-            # the second writing
-            # maximum_iterations = hidden_frame + 10
-            # start_tokens = tf.fill([bs], SOS_ID)
-            # (first_finished, first_inputs, first_state) = beam_decoder_instance.initialize(
-            #     self.Decoder.dec_embedding.embeddings,
-            #     start_tokens=start_tokens,
-            #     end_token=EOS_ID,
-            #     initial_state=decoder_initial_state)
-            #
-            # inputs = first_inputs
-            # state = first_state
-            # predictions = np.empty((bs, beam_size, 0), dtype=np.int32)
-            # beam_scores = np.empty((bs, beam_size, 0), dtype=np.float32)
-            # for j in range(maximum_iterations):
-            #     beam_search_outputs, next_state, next_inputs, finished = beam_decoder_instance.step(j, inputs, state)
-            #     inputs = next_inputs
-            #     state = next_state
-            #     outputs = np.expand_dims(beam_search_outputs.predicted_ids, axis=-1)
-            #     scores = np.expand_dims(beam_search_outputs.scores, axis=-1)
-            #     predictions = np.append(predictions, outputs, axis=-1)
-            #     beam_scores = np.append(beam_scores, scores, axis=-1)
-            # print(predictions.shape)
-            # print(beam_scores.shape)
-
 
 if __name__ == "__main__":
     import numpy as np
@@ -193,20 +146,3 @@ if __name__ == "__main__":
     src_len = np.array([5, 6, 7, 8, 9])
     src_len = tf.convert_to_tensor(src_len)
     model = ModelResNet(tgt_vocab_size=2000, tgt_emb_size=300, rnn_units=64)
-    # beam_scores, beam_predictions = model(inputs=(src, src_len), beam_size=3, training=False)
-    # bs, _, beam_size = beam_scores.shape
-    # beam_scores = tf.reshape(beam_scores, (bs, beam_size, -1)).numpy()
-    # beam_predictions = tf.reshape(beam_predictions, (bs, beam_size, -1)).numpy()
-    # for i in range(len(beam_predictions)):
-    #     print("---------------------------------------------")
-    #     output_beams_per_sample = beam_predictions[i, :, :]
-    #     score_beams_per_sample = beam_scores[i, :, :]
-    #     print(output_beams_per_sample.shape)
-    #     for beam, score in zip(output_beams_per_sample, score_beams_per_sample):
-    #         seq = list(itertools.takewhile(lambda index: index != EOS_ID, beam))
-    #         score_indexes = np.arange(len(seq))
-    #         beam_score = score[score_indexes].sum()
-    #         # print(" ".join([Y_tokenizer.index_word[w] for w in seq]), " beam score: ", beam_score)
-    #         print(seq, beam_score)
-
-

@@ -3,7 +3,6 @@ reference:  https://github.com/irhum/R2Plus1D-PyTorch/blob/master/network.py
 """
 
 import tensorflow as tf
-import math
 from cnn_models.modules.SpatioTemporalModule import SpatioTemporalResLayer, SpatioTemporalResBlock, SpatioTemporalConv
 from cnn_models.modules.SpatioModule import SpatioResLayer, SpatioResBlock
 

@@ -47,8 +47,6 @@ def create_rnn_cell(enc_units, unit_type, num_layers, residual, init_op, dropout
                                      dropout=dropout,
                                      forget_bias=forget_bias)
         cell_list.append(single_cell)
-    if num_layers == 1:
-        cell_list = cell_list[0]
     return cell_list
 
 
@@ -63,22 +61,21 @@ class Encoder(tf.keras.Model):
         # build encoder rnn cell
         cells = create_rnn_cell(enc_units, unit_type, num_layers, residual, init_op, dropout, training,
                                 forget_bias)
+        if len(cells) == 1:
+            cells = cells[0]
 
         self.enc_rnn = tf.keras.layers.RNN(cell=cells,
                                            return_sequences=True,
                                            return_state=True)
 
-    def call(self, x):
+    def call(self, x, training=True):
         """Encoder"""
-        output = self.enc_rnn(x)
-        if self.unit_type == "gru":
-            rnn_output, rnn_states = output[0], output[1]
-        elif self.unit_type == "lstm":
-            rnn_output, rnn_states = output[0], output[1]
+        output = self.enc_rnn(x, training=training)
+        rnn_output, rnn_states = output[0], output[1:]
+        if self.num_layers > 1:
+            return rnn_output, tuple(rnn_states)
         else:
-            raise ValueError("Unknown rnn unit_type")
-        return rnn_output, tuple([rnn_states] * self.num_layers)
-
+            return rnn_output, rnn_states
 
 class Decoder(tf.keras.Model):
     def __init__(self, emb_size, tgt_vocab_size, rnn_units, unit_type, num_layers, residual, init_op, dropout, training,
@@ -92,7 +89,10 @@ class Decoder(tf.keras.Model):
         # self.decoder_rnncell = tf.keras.layers.GRUCell(rnn_units)
         cells = create_rnn_cell(rnn_units, unit_type, num_layers, residual, init_op, dropout, training,
                                 forget_bias)
-        self.decoder_rnncell = tf.keras.layers.StackedRNNCells(cells)
+        if len(cells) > 1:
+            self.decoder_rnncell = tf.keras.layers.StackedRNNCells(cells)
+        else:
+            self.decoder_rnncell = cells[0]
 
         # sampler
         self.simpler = tfa.seq2seq.sampler.TrainingSampler()
@@ -121,17 +121,21 @@ class Decoder(tf.keras.Model):
     def build_decoder_initial_state(self, batch_size, enc_state, Dtype):
         decoder_initial_state = self.attention_rnn_cell.get_initial_state(batch_size=batch_size,
                                                                           dtype=Dtype)
+        # print(decoder_initial_state.cell_state[0])
+        # print(enc_state[0])
+        # exit()
         decoder_initial_state = decoder_initial_state.clone(cell_state=enc_state)
         return decoder_initial_state
 
 
 if __name__ == "__main__":
-    enc = Encoder(enc_units=15, unit_type="lstm", num_layers=2, residual=True, init_op="glorot_normal", dropout=0.2,
+    enc = Encoder(enc_units=15, unit_type="lstm", num_layers=4, residual=True, init_op="glorot_normal", dropout=0.2,
                   training=True, forget_bias=True)
     x = tf.random.normal((5, 4, 4))
     enc_out, enc_state = enc(x)
+    # print(enc_state[0])
     # exit()
-    dec = Decoder(emb_size=300, tgt_vocab_size=2000, rnn_units=15, unit_type="lstm", num_layers=2, residual=True,
+    dec = Decoder(emb_size=300, tgt_vocab_size=2000, rnn_units=15, unit_type="lstm", num_layers=4, residual=True,
                   init_op="glorot_normal", dropout=0.2,
                   training=True, forget_bias=True)
     dec.attention_mechanism.setup_memory(memory=enc_out)
@@ -140,4 +144,4 @@ if __name__ == "__main__":
     decoder_emb_inp = tf.random.normal((5, 10, 300))
     outputs, _, _ = dec.decoder(decoder_emb_inp, initial_state=dec_init_state,
                                 sequence_length=5 * [8 - 1])
-    print(outputs.rnn_output.shape)
+    # print(outputs.rnn_output.shape)
