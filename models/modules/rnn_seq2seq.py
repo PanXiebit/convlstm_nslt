@@ -26,9 +26,9 @@ def single_cell_fn(enc_units, unit_type, residual, init_op, dropout, forget_bias
     return single_cell
 
 
-def create_rnn_cell(enc_units, unit_type, num_layers, residual, init_op, dropout, training,
+def create_rnn_cell(enc_units, unit_type, num_layers, residual, init_op, dropout,
                     forget_bias=True):
-    dropout = dropout if training else 0.0
+    # dropout = dropout if training else 0.0
 
     if residual and num_layers > 1:
         if unit_type == "gnmt":
@@ -51,7 +51,7 @@ def create_rnn_cell(enc_units, unit_type, num_layers, residual, init_op, dropout
 
 
 class Encoder(tf.keras.Model):
-    def __init__(self, enc_units, unit_type, num_layers, residual, init_op, dropout, training,
+    def __init__(self, enc_units, unit_type, num_layers, residual, init_op, dropout,
                  forget_bias=True):
         super(Encoder, self).__init__()
         self.enc_units = enc_units
@@ -59,7 +59,7 @@ class Encoder(tf.keras.Model):
         self.num_layers = num_layers
 
         # build encoder rnn cell
-        cells = create_rnn_cell(enc_units, unit_type, num_layers, residual, init_op, dropout, training,
+        cells = create_rnn_cell(enc_units, unit_type, num_layers, residual, init_op, dropout,
                                 forget_bias)
         if len(cells) == 1:
             cells = cells[0]
@@ -78,8 +78,8 @@ class Encoder(tf.keras.Model):
             return rnn_output, rnn_states
 
 class Decoder(tf.keras.Model):
-    def __init__(self, emb_size, tgt_vocab_size, rnn_units, unit_type, num_layers, residual, init_op, dropout, training,
-                 forget_bias=True):
+    def __init__(self, emb_size, tgt_vocab_size, rnn_units, unit_type, num_layers,
+                 residual, init_op, dropout, forget_bias=True):
         super(Decoder, self).__init__()
         self.rnn_units = rnn_units
         self.dec_embedding = tf.keras.layers.Embedding(input_dim=tgt_vocab_size, output_dim=emb_size)
@@ -87,7 +87,7 @@ class Decoder(tf.keras.Model):
 
         # rnn
         # self.decoder_rnncell = tf.keras.layers.GRUCell(rnn_units)
-        cells = create_rnn_cell(rnn_units, unit_type, num_layers, residual, init_op, dropout, training,
+        cells = create_rnn_cell(rnn_units, unit_type, num_layers, residual, init_op, dropout,
                                 forget_bias)
         if len(cells) > 1:
             self.decoder_rnncell = tf.keras.layers.StackedRNNCells(cells)

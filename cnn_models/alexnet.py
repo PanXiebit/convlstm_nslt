@@ -3,10 +3,6 @@ from tensorflow.keras.layers import Conv2D, MaxPool2D, Flatten, Dense, Dropout
 import numpy as np
 
 
-
-
-
-
 class AlexNet(tf.keras.Model):
     def __init__(self, dropout_rate, weights_path):
         super(AlexNet, self).__init__()

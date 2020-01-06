@@ -2,8 +2,7 @@ import os
 import tensorflow as tf
 from config import FLAGS
 from utils import dataset, metrics
-from models.model import Model
-from models.model_resnet import ModelResNet
+from models.ctc_model import CTCModel
 from utils import vocab_utils, evaluation_utils, misc_utils, lr_schedule
 import time, math
 
@@ -24,21 +23,25 @@ def get_learning_rate(learning_rate, hidden_size, learning_rate_warmup_steps, gl
 
 
 config = FLAGS
-logging.info(config)
+FLAGS.output_dir = "./output_dir/checkpoints_alexnet_ctc"
+FLAGS.best_output = "./output_dir/checkpoints_alexnet_ctc/best_bleu"
+
+for arg in vars(FLAGS):
+    logger.info("{}, {}".format(arg, getattr(FLAGS, arg)))
+
+
 tgt_vocab_size, tgt_vocab_file = vocab_utils.check_vocab(config.tgt_vocab_file,
                                                          "./",
                                                          sos="<s>",
                                                          eos="</s>",
                                                          unk=vocab_utils.UNK)
+
 tgt_vocab_table = vocab_utils.create_tgt_vocab_table(config.tgt_vocab_file)
 word2idx, idx2word = vocab_utils.create_tgt_dict(tgt_vocab_file)
 
 # model = Model(rnn_units=config.rnn_units, tgt_vocab_size=tgt_vocab_size, tgt_emb_size=config.tgt_emb_size)
-model = ModelResNet(input_shape=config.input_shape, tgt_vocab_size=tgt_vocab_size, tgt_emb_size=config.tgt_emb_size,
-                    rnn_units=config.rnn_units, unit_type=config.unit_type,
-                    num_layers=config.num_layers, residual=config.residual,
-                    init_op=config.init_op, dropout=config.dropout, training=True,
-                    forget_bias=config.forget_bias)
+model = CTCModel(input_shape=config.input_shape, tgt_vocab_size=tgt_vocab_size, dropout=config.dropout,
+                 rnn_units=FLAGS.rnn_units)
 
 
 lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
@@ -70,73 +73,47 @@ except:
 # use the @tf.function decorator to take advance of static graph computation (remove it when you want to debug)
 # @tf.function
 def train_step(batch_data):
-    src_inputs, tgt_input_ids, tgt_output_ids, src_len, tgt_len = batch_data
     with tf.GradientTape() as tape:
-        logits = model(batch_data, training=True)
-        xentropy, weights = metrics.padded_cross_entropy_loss(logits, tgt_output_ids,
-                                                              config.label_smoothing, vocab_size=tgt_vocab_size)
-        loss = tf.reduce_sum(xentropy) / tf.reduce_sum(weights)
-    variables = model.Encoder.trainable_variables + model.Decoder.trainable_variables
+        loss = model(batch_data, training=True)
+    # !!! weather to train variables of cnn model
+    variables = model.trainable_variables
     gradients = tape.gradient(target=loss, sources=variables)
     grads_and_vars = zip(gradients, variables)
     optimizer.apply_gradients(grads_and_vars)
     return loss
 
 
-def eval():
-    """internal evaluation """
-    dev_dataset = dataset.get_train_dataset(src_file=config.eval_src_file, tgt_file=config.eval_tgt_file,
-                                            tgt_vocab_table=tgt_vocab_table, batch_size=config.batch_size)
-    total_cnt, total_loss, total_bleu = 0.0, 0.0, 0.0
-    for batch_num, batch_data in enumerate(dev_dataset.take(config.debug_num)):
-        src_inputs, tgt_input_ids, tgt_output_ids, src_len, tgt_len = batch_data
-        logits = model(batch_data, training=True)
-        bs = logits.shape[0]
-        xentropy, weights = metrics.padded_cross_entropy_loss(logits, tgt_output_ids,
-                                                              config.label_smoothing, vocab_size=tgt_vocab_size)
-        batch_loss = tf.reduce_sum(xentropy) / tf.reduce_sum(weights)
-        batch_bleu = metrics.bleu_score(logits=logits, labels=tgt_output_ids)
-        total_cnt += bs
-        total_loss += bs * batch_loss
-        total_bleu += bs * batch_bleu
-    eval_loss = total_loss / total_cnt
-    eval_bleu = total_bleu / total_cnt
-    return eval_bleu, eval_loss
-
-
 def infer():
     """External evaluation"""
     infer_dataset = dataset.get_infer_dataset(src_file=config.test_src_file, tgt_file=config.test_tgt_file,
                                               tgt_vocab_table=tgt_vocab_table)
-    total_cnt, total_loss, total_bleu = 0.0, 0.0, 0.0
+    total_cnt, total_acc= 0.0, 0.0
     for batch_num, batch_data in enumerate(infer_dataset.take(config.debug_num)):
         src, tgt, src_len, tgt_len = batch_data
-        pred_logits = model((src, src_len), beam_size=config.beam_size, training=False)
-        bs = pred_logits.shape[0]
-        batch_bleu = metrics.bleu_score(logits=pred_logits, labels=tgt)
+        predicts = model(batch_data, training=False)
+        bs = predicts.shape[0]
+        batch_acc = metrics._compute_accuracy(predictions=predicts, labels=tgt)
         total_cnt += bs
-        total_bleu += bs * batch_bleu
+        total_acc += bs * batch_acc
         if batch_num % 50 == 0:
-            predictions = pred_logits[0].numpy()
+            predictions = predicts[0].numpy()
             label = tgt[0].numpy()
             pred_sent = [idx2word[idx] for idx in list(predictions)]
             label_sent = [idx2word[idx] for idx in list(label)]
             logger.info("\n reference sentences: {} \n predicted senteces: {}".format(" ".join(label_sent),
                                                                                       " ".join(pred_sent)))
-    test_bleu = total_bleu / total_cnt
-    return test_bleu
+    test_acc = total_acc / total_cnt
+    return test_acc
 
 
 def main(global_step=global_step):
     train_dataset = dataset.get_train_dataset(src_file=config.train_src_file, tgt_file=config.train_tgt_file,
                                               tgt_vocab_table=tgt_vocab_table, batch_size=config.batch_size)
-    init_bleu = 0
+    init_acc = 0
     if config.eval_only:
         logger.info("======== Evaluation only ===============")
-        eval_bleu, eval_loss = eval()
-        test_bleu = infer()
-        logger.info("Eval loss {:.4f}, bleu {:.4f}".format(eval_loss, eval_bleu))
-        logger.info("Test bleu {:.4f}".format(test_bleu))
+        test_acc = infer()
+        logger.info("Test acc {:.4f}".format(test_acc))
     else:
         for epoch in range(config.max_epochs):
             total_loss, total_cnt, step_time = 0.0, 0.0, 0.0
@@ -150,26 +127,20 @@ def main(global_step=global_step):
                 step_time += time.time() - start_time
                 if (global_step + 1) % 100 == 0:
                     train_loss = total_loss / total_cnt
-                    train_ppl = misc_utils.safe_exp(total_loss / total_cnt)
                     speed = total_cnt / step_time
-                    logger.info("epoch {} global_step {} example-time {:.2f} total loss: {:.4f} ppl {:.4f}".
-                                format(epoch, global_step + 1, speed, train_loss, train_ppl))
-                    if math.isnan(train_ppl):
-                        break
+                    logger.info("epoch {} global_step {} example-time {:.2f} total loss: {:.4f}".
+                                format(epoch, global_step + 1, speed, train_loss))
                     total_loss, total_cnt, step_time = 0.0, 0.0, 0.0
                 global_step += 1
-            eval_bleu, eval_loss = eval()
-            test_bleu = infer()
-            logger.info("Epoch {}, Internal eval bleu {:.4f} loss {:.4f}, External test bleu {:.4f}".
-                        format(epoch, eval_bleu, eval_loss, test_bleu))
-            checkpoint.save(file_prefix=chkpoint_prefix + "_bleu_{:.4f}".format(test_bleu) + "-" + str(global_step))
+            test_acc = infer()
+            checkpoint.save(file_prefix=chkpoint_prefix + "_acc_{:.4f}".format(test_acc) + "-" + str(global_step))
             logger.info("Saving model to {}".format(
-                chkpoint_prefix + "_bleu_{:.4f}".format(test_bleu) + "-" + str(global_step)))
-            if test_bleu > init_bleu:
+                chkpoint_prefix + "_acc_{:.4f}".format(test_acc) + "-" + str(global_step)))
+            if test_acc > init_acc:
                 checkpoint.save(
-                    file_prefix=best_output + "_bleu_{:.4f}".format(test_bleu) + "-" + str(global_step))
-                init_bleu = test_bleu
-                logger.info("Currently the best bleu {:.4f}".format(test_bleu))
+                    file_prefix=best_output + "_acc_{:.4f}".format(test_acc) + "-" + str(global_step))
+                init_acc = test_acc
+                logger.info("Currently the best acc {:.4f}".format(test_acc))
 
 
 if __name__ == "__main__":

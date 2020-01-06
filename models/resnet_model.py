@@ -7,8 +7,8 @@ import tensorflow_addons as tfa
 
 
 class ModelResNet(tf.keras.Model):
-    def __init__(self, input_shape, tgt_emb_size, tgt_vocab_size, rnn_units, unit_type, num_layers, residual, init_op, dropout, training,
-                 forget_bias):
+    def __init__(self, input_shape, tgt_emb_size, tgt_vocab_size, rnn_units,
+                 unit_type, num_layers, residual, init_op, dropout, forget_bias):
         super(ModelResNet, self).__init__()
 
         # self.cnn_model = ResNet(layer_num=18, include_top=True)
@@ -18,9 +18,9 @@ class ModelResNet(tf.keras.Model):
         # self.cnn_model.load_weights("/home/panxie/Documents/sign-language/nslt/BaseModel/ResNet_18.h5")
         self.cnn_model.load_weights()
 
-        self.Encoder = Encoder(rnn_units, unit_type, num_layers, residual, init_op, dropout, training,
+        self.Encoder = Encoder(rnn_units, unit_type, num_layers, residual, init_op, dropout,
                                forget_bias)
-        self.Decoder = Decoder(tgt_emb_size, tgt_vocab_size, rnn_units, unit_type, num_layers, residual, init_op, dropout, training,
+        self.Decoder = Decoder(tgt_emb_size, tgt_vocab_size, rnn_units, unit_type, num_layers, residual, init_op, dropout,
                                forget_bias)
 
     def call(self, inputs, beam_size=1, training=None, mask=None):

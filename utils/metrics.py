@@ -13,8 +13,10 @@ def _pad_tensors_to_same_length(x, y):
         y_length = tf.shape(y)[1]
 
         max_length = tf.maximum(x_length, y_length)
-
-        x = tf.pad(x, [[0, 0], [0, max_length - x_length], [0, 0]])
+        if tf.rank(x) == 3:
+            x = tf.pad(x, [[0, 0], [0, max_length - x_length], [0, 0]])
+        else:
+            x = tf.pad(x, [[0, 0], [0, max_length - x_length]])
         y = tf.pad(y, [[0, 0], [0, max_length - y_length]])
         return x, y
 
@@ -168,8 +170,24 @@ def _get_ngrams_with_counter(segment, max_order):
             ngram_counts[ngram] += 1
     return ngram_counts
 
+
+def _compute_accuracy(predictions, labels):
+    """
+
+    :param predictions: [batch, pred_seq_len]
+    :param labels: [batch, seq_len]
+    :return:
+    """
+    _pad_pred, _pad_labels = _pad_tensors_to_same_length(predictions, labels)
+    _pad_pred = tf.cast(_pad_pred, _pad_labels.dtype)
+    accuracy = tf.cast(tf.equal(_pad_pred, _pad_labels), tf.float32)
+    weights = tf.cast(tf.not_equal(_pad_labels, 0), tf.float32)
+    accuracy = tf.reduce_sum(accuracy * weights) / tf.reduce_sum(weights)
+    return accuracy
+
+
 if __name__ == "__main__":
-    logits = tf.random.normal((2, 2, 10), dtype=tf.float32)
+    logits = tf.constant([[2, 2, 0],[4, 5, 0]], dtype=tf.int32)
     labels = tf.constant([[1,2],[3,4]], dtype=tf.int32)
-    out, weights = padded_cross_entropy_loss(logits, labels, 0.1, 10)
-    print(out, weights)
+    out = _compute_accuracy(logits, labels)
+    print(out)
