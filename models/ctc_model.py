@@ -14,7 +14,7 @@ class CTCModel(tf.keras.Model):
             weights_path="/home/panxie/Documents/sign-language/nslt/BaseModel/bvlc_alexnet.npy")
         self.cnn_model.build((None,) + input_shape + (3,))
         self.cnn_model.load_weights()
-        self.rnn = tf.keras.layers.LSTM(units=rnn_units, go_backwards=True,
+        self.rnn = tf.keras.layers.LSTM(units=rnn_units,
                                         return_sequences=True,
                                         return_state=False)
         self.Dense = tf.keras.layers.Dense(units=tgt_vocab_size)

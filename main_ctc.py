@@ -86,7 +86,7 @@ def train_step(batch_data):
 def infer():
     """External evaluation"""
     infer_dataset = dataset.get_infer_dataset(src_file=config.test_src_file, tgt_file=config.test_tgt_file,
-                                              tgt_vocab_table=tgt_vocab_table)
+                                              filter=True, tgt_vocab_table=tgt_vocab_table)
     total_cnt, total_acc= 0.0, 0.0
     for batch_num, batch_data in enumerate(infer_dataset.take(config.debug_num)):
         src, tgt, src_len, tgt_len = batch_data

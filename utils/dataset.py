@@ -29,6 +29,8 @@ import tensorflow as tf
 
 __all__ = ["BatchedInput", "get_iterator", "get_infer_iterator"]
 
+src_max_len = 300
+tgt_max_len = 50
 
 # NOTE(ebrevdo): When we subclass this, instances' __dict__ becomes empty.
 class BatchedInput(collections.namedtuple("BatchedInput",
@@ -244,7 +246,7 @@ def get_infer_iterator(src_dataset, source_reverse):
     return src_dataset
 
 
-def get_infer_iterator_2(src_dataset, tgt_dataset, tgt_vocab_table, source_reverse, num_parallel_calls=None):
+def get_infer_iterator_2(src_dataset, tgt_dataset, tgt_vocab_table, source_reverse, filter=False, num_parallel_calls=None):
     # Get number of Frames
     src_tgt_dataset = tf.data.Dataset.zip((src_dataset, tgt_dataset))
     # Get number of frames from videos
@@ -255,6 +257,13 @@ def get_infer_iterator_2(src_dataset, tgt_dataset, tgt_vocab_table, source_rever
     src_tgt_dataset = src_tgt_dataset.map(lambda src, tgt, src_len:
                                           (src, tf.strings.split([tgt]).values, src_len),
                                           num_parallel_calls=num_parallel_calls)  # src_path, tgt_tokens, src_len
+
+    if filter:
+        src_tgt_dataset = src_tgt_dataset.filter(
+            lambda src, tgt, src_len: tf.logical_and(src_len > 0, tf.size(tgt) > 0))
+        src_tgt_dataset = src_tgt_dataset.filter(
+            lambda src, tgt, src_len: tf.logical_and(src_len < src_max_len, tf.size(tgt) < tgt_max_len))
+
     # Convert Tokens to IDs
     src_tgt_dataset = src_tgt_dataset.map(lambda src, tgt, src_len:
                                           (src, tf.cast(tgt_vocab_table.lookup(tgt), tf.int32), src_len),
@@ -264,6 +273,7 @@ def get_infer_iterator_2(src_dataset, tgt_dataset, tgt_vocab_table, source_rever
     src_tgt_dataset = src_tgt_dataset.map(lambda src, tgt, src_len:
                                           (src, tgt, src_len, tf.size(tgt)),
                                           num_parallel_calls=num_parallel_calls)  # src_path, tgt_in_ids, tgt_out_ids, src_len, tgt_len
+
 
     src_tgt_dataset = src_tgt_dataset.map(lambda src, tgt, src_len, tgt_len:
                                   (tf.py_function(read_video, [src, source_reverse], tf.float32), tgt,
@@ -291,11 +301,12 @@ def get_train_dataset(src_file, tgt_file, tgt_vocab_table, batch_size=301):
                             skip_count=None)
     return iterator
 
-def get_infer_dataset(src_file, tgt_file, tgt_vocab_table, source_reverse=False):
+def get_infer_dataset(src_file, tgt_file, tgt_vocab_table, filter=False, source_reverse=False):
     src_dataset = tf.data.TextLineDataset(src_file)
     tgt_dataset = tf.data.TextLineDataset(tgt_file)
 
-    iterator = get_infer_iterator_2(src_dataset, tgt_dataset, tgt_vocab_table, source_reverse=source_reverse)
+    iterator = get_infer_iterator_2(src_dataset, tgt_dataset, tgt_vocab_table,
+                                    filter=filter, source_reverse=source_reverse)
     return iterator
 
 if __name__ == "__main__":
@@ -315,7 +326,7 @@ if __name__ == "__main__":
     #     cnt += 1
     #     print(data[0].shape, data[1].shape, data[2].shape, data[3].shape, data[4].shape)
     # print(cnt)
-    dataset = get_train_dataset(src_file, tgt_file, tgt_vocab_table)
+    dataset = get_infer_dataset(src_file, tgt_file, tgt_vocab_table)
     cnt = 0
     for data in dataset.take(-1):
         cnt += 1
