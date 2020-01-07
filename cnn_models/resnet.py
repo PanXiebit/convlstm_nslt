@@ -148,7 +148,7 @@ class ResNet(tf.keras.models.Model):
         if self.include_top:
             out = self.fc(net)
         # print('fully connected', net.shape)
-        return net
+        return net, out
 
 if __name__ == '__main__':
     import os

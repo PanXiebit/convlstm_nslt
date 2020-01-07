@@ -92,7 +92,7 @@ def eval():
                                             tgt_vocab_table=tgt_vocab_table, batch_size=config.batch_size)
     total_cnt, total_loss, total_bleu = 0.0, 0.0, 0.0
     for batch_num, batch_data in enumerate(dev_dataset.take(config.debug_num)):
-        src_inputs, tgt_input_ids, tgt_output_ids, src_len, tgt_len = batch_data
+        src_inputs, tgt_input_ids, tgt_output_ids, src_path, src_len, tgt_len = batch_data
         logits = model(batch_data, training=True)
         bs = logits.shape[0]
         xentropy, weights = metrics.padded_cross_entropy_loss(logits, tgt_output_ids,
@@ -145,7 +145,7 @@ def main(global_step=global_step):
             total_loss, total_cnt, step_time = 0.0, 0.0, 0.0
             for batch_data in train_dataset.take(config.steps_per_epoch):
                 start_time = time.time()
-                src_inputs, tgt_input_ids, tgt_output_ids, src_len, tgt_len = batch_data
+                src_inputs, tgt_input_ids, tgt_output_ids, src_path, src_len, tgt_len = batch_data
                 batch_size = src_inputs.shape[0]
                 batch_loss = train_step(batch_data)
                 total_loss += batch_loss * batch_size

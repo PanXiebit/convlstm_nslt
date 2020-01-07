@@ -80,7 +80,7 @@ def _batch_examples(dataset, batch_size, src_max_length):
     bucket_batch_sizes = [batch_size // x for x in buckets_max]
     bucket_batch_sizes = tf.constant(bucket_batch_sizes, dtype=tf.int64)
 
-    def example_to_bucket_id(example_input, example_target, _1, _2, _3):
+    def example_to_bucket_id(example_input, example_target, _1, _2, _3, _4):
         """Return int64 bucket id for this example, calculated based on length."""
         seq_length = _get_example_length((example_input, example_target))
 
@@ -102,7 +102,7 @@ def _batch_examples(dataset, batch_size, src_max_length):
         # examples have the same length, and all target sequences have the same
         # lengths as well. Resulting lengths of inputs and targets can differ.
         return grouped_dataset.padded_batch(bucket_batch_size, ([None, None, None, None],
-                                                                [None], [None], [], []))
+                                                                [None], [None], [], [], []))
 
     return dataset.apply(tf.data.experimental.group_by_window(
         key_func=example_to_bucket_id,
@@ -176,7 +176,6 @@ def get_iterator(src_dataset,
 
     # Shuffle Samples: You must do it as early as possible
     src_tgt_dataset = src_tgt_dataset.shuffle(output_buffer_size * 1000, random_seed)
-
     # Get number of frames from videos
     src_tgt_dataset = src_tgt_dataset.map(
         lambda src, tgt: (src, tgt, tf.py_function(get_number_of_frames, [src], tf.int32)),
@@ -213,8 +212,9 @@ def get_iterator(src_dataset,
     # Read video, transfer video path to tensor
     src_tgt_dataset = src_tgt_dataset.map(lambda src, tgt_in, tgt_out, src_len, tgt_len:
                                           (tf.py_function(read_video, [src, source_reverse], tf.float32),
-                                           tgt_in, tgt_out, src_len, tgt_len),
-                                          num_parallel_calls=num_parallel_calls)  # src_video, tgt_in_ids, tgt_out_ids, src_len, tgt_len
+                                           tgt_in, tgt_out, src, src_len, tgt_len),
+                                          num_parallel_calls=num_parallel_calls)
+    # src_video, tgt_in_ids, tgt_out_ids, src_path, src_len, tgt_len
 
     # src_tgt_dataset = src_tgt_dataset.padded_batch(batch_size=2,
     #                                                padded_shapes=([None, None, None, None],

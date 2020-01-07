@@ -1,5 +1,5 @@
 
-sudo /home/panxie/anaconda3/envs/tf-2.0/bin/python -m main_ctc \
+python -m main_ctc \
 	--tgt_vocab_file="/home/panxie/Documents/sign-language/nslt/Data/phoenix2014T.vocab.gloss" \
 	--train_src_file="/home/panxie/Documents/sign-language/nslt/Data/phoenix2014T.train.sign" \
 	--train_tgt_file="/home/panxie/Documents/sign-language/nslt/Data/phoenix2014T.train.gloss" \
