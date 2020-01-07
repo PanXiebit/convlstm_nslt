@@ -5,6 +5,7 @@ from utils import dataset, metrics
 from models.mclstm_model import Model
 from models.resnet_model import ModelResNet
 from utils import vocab_utils, evaluation_utils, misc_utils, lr_schedule
+from utils.lr_schedule import CustomSchedule
 import time, math
 
 import logging
@@ -37,17 +38,19 @@ word2idx, idx2word = vocab_utils.create_tgt_dict(tgt_vocab_file)
 model = ModelResNet(input_shape=config.input_shape, tgt_vocab_size=tgt_vocab_size, tgt_emb_size=config.tgt_emb_size,
                     rnn_units=config.rnn_units, unit_type=config.unit_type,
                     num_layers=config.num_layers, residual=config.residual,
-                    init_op=config.init_op, dropout=config.dropout, training=True,
-                    forget_bias=config.forget_bias)
+                    init_op=config.init_op, dropout=config.dropout, forget_bias=config.forget_bias)
 
 
-lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-    config.learning_rate,
-    decay_steps=config.decay_steps,
-    decay_rate=0.96,
-    staircase=True)
-
-optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+# lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+#     config.learning_rate,
+#     decay_steps=config.decay_steps,
+#     decay_rate=0.96,
+#     staircase=True)
+#
+# optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+learning_rate = CustomSchedule(config.rnn_units)
+optimizer = tf.keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.98,
+                                     epsilon=1e-9)
 
 checkpointdir = config.output_dir
 chkpoint_prefix = os.path.join(checkpointdir, "checkpoint")
@@ -152,8 +155,9 @@ def main(global_step=global_step):
                     train_loss = total_loss / total_cnt
                     train_ppl = misc_utils.safe_exp(total_loss / total_cnt)
                     speed = total_cnt / step_time
-                    logger.info("epoch {} global_step {} example-time {:.2f} total loss: {:.4f} ppl {:.4f}".
-                                format(epoch, global_step + 1, speed, train_loss, train_ppl))
+                    current_lr = learning_rate(step=tf.constant(global_step, dtype=tf.float32))
+                    logger.info("epoch {} global_step {} example-time {:.2f} lr: {:.4f} total loss: {:.4f} ppl {:.4f}".
+                                format(epoch, global_step + 1, speed, current_lr, train_loss, train_ppl))
                     if math.isnan(train_ppl):
                         break
                     total_loss, total_cnt, step_time = 0.0, 0.0, 0.0
