@@ -185,9 +185,48 @@ def _compute_accuracy(predictions, labels):
     accuracy = tf.reduce_sum(accuracy * weights) / tf.reduce_sum(weights)
     return accuracy
 
+import string
+import unicodedata
+import editdistance
+
+def ocr_metrics(predicts, ground_truth, norm_accentuation=False, norm_punctuation=False):
+    """Calculate Character Error Rate (CER), Word Error Rate (WER) and Sequence Error Rate (SER)"""
+
+    if len(predicts) == 0 or len(ground_truth) == 0:
+        return (1, 1, 1)
+
+    cer, wer, ser = [], [], []
+
+    for (pd, gt) in zip(predicts, ground_truth):
+        if norm_accentuation:
+            pd = unicodedata.normalize("NFKD", pd).encode("ASCII", "ignore").decode("ASCII")
+            gt = unicodedata.normalize("NFKD", gt).encode("ASCII", "ignore").decode("ASCII")
+
+        if norm_punctuation:
+            pd = pd.translate(str.maketrans("", "", string.punctuation))
+            gt = gt.translate(str.maketrans("", "", string.punctuation))
+
+        pd_cer, gt_cer = list(pd.lower()), list(gt.lower())
+        dist = editdistance.eval(pd_cer, gt_cer)
+        cer.append(dist / (max(len(pd_cer), len(gt_cer))))
+
+        pd_wer, gt_wer = pd.lower().split(), gt.lower().split()
+        dist = editdistance.eval(pd_wer, gt_wer)
+        wer.append(dist / (max(len(pd_wer), len(gt_wer))))
+
+        pd_ser, gt_ser = [pd], [gt]
+        dist = editdistance.eval(pd_ser, gt_ser)
+        ser.append(dist / (max(len(pd_ser), len(gt_ser))))
+
+    cer_f = sum(cer) / len(cer)
+    wer_f = sum(wer) / len(wer)
+    ser_f = sum(ser) / len(ser)
+
+    return (cer_f, wer_f, ser_f)
+
 
 if __name__ == "__main__":
     logits = tf.constant([[2, 2, 0],[4, 5, 0]], dtype=tf.int32)
     labels = tf.constant([[1,2],[3,4]], dtype=tf.int32)
-    out = _compute_accuracy(logits, labels)
+    out = ocr_metrics(logits, labels)
     print(out)

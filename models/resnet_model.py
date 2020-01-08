@@ -25,7 +25,7 @@ class ModelResNet(tf.keras.Model):
 
     def call(self, inputs, beam_size=1, training=None, mask=None):
         if training:
-            src_inputs, tgt_input_ids, tgt_output_ids, src_len, tgt_len = inputs
+            src_inputs, tgt_input_ids, tgt_output_ids, src_path, src_len, tgt_len = inputs
             return self.decoder(src_inputs, tgt_input_ids, src_len, tgt_len, training)
         else:
             self.beam_size = beam_size

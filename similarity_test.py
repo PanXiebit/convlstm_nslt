@@ -54,9 +54,9 @@ for data in dataset.take(1):
     src_inputs, tgt_in, tgt_out, src_path, src_len, tgt_len = data
     bs, t, h, w, c = src_inputs.shape
     print(src_inputs.shape, src_path)
-    # src_inputs = tf.reshape(src_inputs, (bs*t, h, w, c))
-    # cnn_output, _ = resnet_model(src_inputs, training=False)
-    cnn_output = tf.reshape(src_inputs, (bs, t, -1))
+    src_inputs = tf.reshape(src_inputs, (bs*t, h, w, c))
+    cnn_output = resnet_model(src_inputs, training=False)
+    cnn_output = tf.reshape(cnn_output, (bs, t, -1))
     attention_out, atten_weights, atten_logits = scaled_dot_product_attention(cnn_output, cnn_output, cnn_output, mask=None)
     for i in range(100):
         # print(atten_logits[0, i, :])

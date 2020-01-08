@@ -268,10 +268,11 @@ class CustomSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
         return tf.math.rsqrt(self.d_model) * tf.math.minimum(arg1, arg2)
 
 if __name__ == "__main__":
-    temp_learning_rate_schedule = CustomSchedule(d_model=512)
+    temp_learning_rate_schedule = CustomSchedule(d_model=1000)
 
-    # plt.plot(temp_learning_rate_schedule(tf.range(40000, dtype=tf.float32)))
-    # plt.ylabel("Learning Rate")
-    # plt.xlabel("Train Step")
-    # plt.show()
-    print(temp_learning_rate_schedule(tf.constant(5000, dtype=tf.float32)))
+    plt.plot(temp_learning_rate_schedule(tf.range(40000, dtype=tf.float32)))
+    plt.ylabel("Learning Rate")
+    plt.xlabel("Train Step")
+    plt.show()
+    step = tf.Variable(5, trainable=False, dtype=tf.float32)
+    print(temp_learning_rate_schedule(step))

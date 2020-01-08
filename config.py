@@ -78,6 +78,8 @@ def add_arguments(parser):
                         default=0.00001)
     parser.add_argument("--decay_steps", type=int, help="rnn hidden size",
                         default=1000)
+    parser.add_argument("--decay_rate", type=int, help="learning rate decay",
+                        default=1e-5)
     parser.add_argument("--label_smoothing", type=float, help="rnn hidden size",
                         default=0.1)
     parser.add_argument("--beam_size", type=int, help="rnn hidden size",
@@ -112,6 +114,10 @@ def add_arguments(parser):
                         default="/home/panxie/Documents/sign-language/nslt/Data/phoenix2014T.test.sign")
     parser.add_argument("--test_tgt_file", type=str, help="test target file",
                         default="/home/panxie/Documents/sign-language/nslt/Data/phoenix2014T.test.de")
+    parser.add_argument("--resnet_weight_path", type=str, help="the pretrained model of resnet",
+                        default="/home/panxie/Documents/sign-language/nslt/BaseModel/ResNet_18.h5")
+    parser.add_argument("--alexnet_weight_path", type=str, help="the pretrained model of resnet",
+                        default="/home/panxie/Documents/sign-language/nslt/BaseModel/bvlc_alexnet.npy")
 
 
 nmt_parser = argparse.ArgumentParser()
