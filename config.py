@@ -116,8 +116,10 @@ def add_arguments(parser):
                         default="/home/panxie/Documents/sign-language/nslt/Data/phoenix2014T.test.de")
     parser.add_argument("--resnet_weight_path", type=str, help="the pretrained model of resnet",
                         default="/home/panxie/Documents/sign-language/nslt/BaseModel/ResNet_18.h5")
-    parser.add_argument("--alexnet_weight_path", type=str, help="the pretrained model of resnet",
+    parser.add_argument("--alexnet_weight_path", type=str, help="the pretrained model of alenet",
                         default="/home/panxie/Documents/sign-language/nslt/BaseModel/bvlc_alexnet.npy")
+    parser.add_argument("--cnn_architecture", type=str, help="alexnet | resnet | ...",
+                        default="alexnet")
 
 
 nmt_parser = argparse.ArgumentParser()

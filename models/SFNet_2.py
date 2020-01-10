@@ -26,18 +26,10 @@ class SFNet(tf.keras.Model):
         else:
             raise ValueError("CNN model architexture isn't existed!")
 
-        # gloss level
-        self.gloss_rnn = LSTM(units=rnn_units, return_sequences=False, return_state=True)
-        self.gloss_ln = LayerNormalization()
-        self.gloss_fc = Dense(units=tgt_vocab_size)
-
         # sentence level
         self.sent_rnn = Bidirectional(LSTM(units=rnn_units, return_sequences=True, return_state=False))
         self.sent_ln = LayerNormalization()
         self.sent_fc = Dense(units=tgt_vocab_size)
-
-        # loss
-        self.reg_loss_func = tf.keras.losses.KLDivergence()
 
     def call(self, inputs, training=None, mask=None):
         """
@@ -56,57 +48,29 @@ class SFNet(tf.keras.Model):
         # print("cnn_out: ", cnn_out.shape)
         cnn_out = tf.reshape(cnn_out, (bs, t, -1))  # [bs, t, K], K is the last channels of CNN
 
-        # gloss level
-        # framing step
-        L = 12
-        S = 3
-        F = math.ceil((t - L) / S) + 1
-        gloss_frame = []
-        for i in range(0, F):
-            meta_frame = cnn_out[:, i * S:i * S + L, :]  # [bs, <=L, K]
-            meta_frame = tf.pad(meta_frame, [[0, 0], [0, L - meta_frame.shape[1]], [0, 0]])  # [bs, L, K]
-            gloss_frame.append(tf.expand_dims(meta_frame, axis=1))
-        gloss_frame = tf.concat(gloss_frame, axis=1)  # [bs, F, L, K]
-        gloss_frame = tf.reshape(gloss_frame, (bs * F, L, -1))  # [bs*F, L, K]
-        _, h_states, c_states = self.gloss_rnn(gloss_frame)  # [bs*F, H]
-        gloss_out = tf.reshape(h_states, (bs, F, -1))  # [bs, F, H]
-        gloss_out = self.gloss_ln(gloss_out)
-        gloss_fc = self.gloss_fc(gloss_out)  # for regularizer
 
-        # sentence level
-        sent_out = self.sent_rnn(gloss_out)  # [bs, F, 2H]
+        sent_out = self.sent_rnn(cnn_out)  # [bs, F, 2H]
         sent_out = self.sent_ln(sent_out)
         logits = self.sent_fc(sent_out)  # [bs, F, tgt_vocab_size]
-        logits_length = tf.constant([F] * bs, dtype=tf.int32)
         if training:
             tgt_input = tgt_input_ids[:, 1:]
-            # print(tgt_input, tgt_input_ids)
-            # exit()
             tgt_len = tgt_len - 1               # remove eos token
-            if tf.reduce_min(tgt_len) > F:      # in CTC loss, source len must longer than target len
-                tgt_input = tgt_input[:, :F]
-                cond = tf.cast(F >= tgt_len, tf.int32)
-                tgt_len = tgt_len * cond + (1 - cond) * F
-            # print(tgt_len)
-            # exit()
             ctc_loss = tf.nn.ctc_loss(labels=tgt_input,
                                       logits=logits,
                                       label_length=tgt_len,
-                                      logit_length=logits_length,
+                                      logit_length=src_len,
                                       logits_time_major=False,
                                       blank_index=-1)
-            reg_loss = self.reg_loss_func(y_true=tf.reshape(logits, (bs * F, -1)),
-                                          y_pred=tf.reshape(gloss_fc, (bs * F, -1)))
             ctc_loss = tf.reduce_mean(ctc_loss)
-            reg_loss = tf.reduce_mean(reg_loss)
+            reg_loss = 0
             return ctc_loss, reg_loss
         else:
             logits = tf.transpose(logits, (1, 0, 2))
             decoded, decoded_prob = tf.nn.ctc_beam_search_decoder(inputs=logits,
-                                                                  sequence_length=logits_length,
+                                                                  sequence_length=src_len,
                                                                   beam_width=10,
                                                                   top_paths=10)
-            return tf.sparse.to_dense(decoded[0])
+            return tf.sparse.to_dense(decoded[0]), decoded_prob
 
 
 if __name__ == "__main__":
@@ -141,8 +105,8 @@ if __name__ == "__main__":
     model = SFNet(input_shape=(227, 227), cnn_model_path=cnn_model_path, tgt_vocab_size=tgt_vocab_size,
                   rnn_units=256, cnn_arch="alexnet")
     tgt_vocab_table = create_tgt_vocab_table(base_path + "/phoenix2014T.vocab.gloss")
-    dataset = get_train_dataset(src_file, tgt_file, tgt_vocab_table)
+    dataset = get_infer_dataset(src_file, tgt_file, tgt_vocab_table)
     cnt = 0
     for data in dataset.take(100):
-        loss = model(data, training=True)
+        loss = model(data, training=False)
         print(loss)

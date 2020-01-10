@@ -47,14 +47,13 @@ def check_vocab(vocab_file, out_dir, pad = None, sos=None, eos=None, unk=None):
             for word in f:
                 vocab_size += 1
                 vocab.append(word.strip())
-
         # Verify if the vocab starts with unk, sos, eos
         # If not, prepend those tokens & generate a new vocab file
         if not pad: pad = PAD
         if not sos: sos = SOS
         if not eos: eos = EOS
         if not unk: unk = UNK
-        assert len(vocab) >= 3
+        assert len(vocab) >= 4
         if vocab[0] != pad or vocab[1] != sos or vocab[2] != eos or vocab[3] != unk:
             utils.print_out("The first 4 vocab words [%s, %s, %s, %s]"
                             " are not [%s, %s, %s, %s]" %

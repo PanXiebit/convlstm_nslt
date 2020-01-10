@@ -1,8 +1,7 @@
 import os
 import tensorflow as tf
 from config import FLAGS
-from cnn_models import alexnet, resnet
-from models.SFNet import SFNet
+from models.SFNet_2 import SFNet
 from utils import dataset, vocab_utils
 import time
 import editdistance
@@ -11,23 +10,29 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-
 config = FLAGS
 for arg in vars(config):
     logger.info("{}, {}".format(arg, getattr(config, arg)))
 
-tgt_vocab_size, tgt_vocab_file = vocab_utils.check_vocab(config.tgt_vocab_file,
-                                                         "./",
-                                                         sos="<s>",
-                                                         eos="</s>",
-                                                         unk=vocab_utils.UNK)
+
+tgt_vocab_size, tgt_vocab_file = vocab_utils.check_vocab(
+    config.tgt_vocab_file, out_dir="./", sos="<s>",
+    eos="</s>", unk=vocab_utils.UNK)
+
 
 tgt_vocab_table = vocab_utils.create_tgt_vocab_table(tgt_vocab_file)
 word2idx, idx2word = vocab_utils.create_tgt_dict(tgt_vocab_file)
+print(word2idx["<blank>"])
+print(len(word2idx))
+
 
 # model = Model(rnn_units=config.rnn_units, tgt_vocab_size=tgt_vocab_size, tgt_emb_size=config.tgt_emb_size)
-model = SFNet(input_shape=config.input_shape, tgt_vocab_size=tgt_vocab_size,
-              rnn_units=config.rnn_units, cnn_model_path=config.alexnet_weight_path, dropout=config.dropout)
+if config.cnn_architecture == "resnet":
+    cnn_model_path = config.resnet_weight_path
+else:
+    cnn_model_path = config.alexnet_weight_path
+model = SFNet(input_shape=config.input_shape, tgt_vocab_size=tgt_vocab_size, rnn_units=config.rnn_units,
+              cnn_arch=config.cnn_architecture, cnn_model_path=cnn_model_path, dropout=config.dropout)
 
 
 lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
@@ -36,7 +41,6 @@ lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
     decay_rate=config.decay_rate,
     staircase=True)
 optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
-
 
 chkpoint_prefix = os.path.join(config.output_dir, "checkpoint")
 best_output_predfix = os.path.join(config.best_output, "checkpoint")
@@ -67,30 +71,30 @@ def train_step(batch_data, epoch, var_print):
         else:
             loss = ctc_loss + reg_loss
     # trainable variables
-    if isinstance(model.cnn_model, resnet.ResNet):
+    if config.cnn_architecture == "resnet":
         # logger.info("==== CNN model using ResNet ====")
         total_variables = model.trainable_variables
         # variable not to training
         remove_var = {}
         for var in model.cnn_model.fc.trainable_variables:
             remove_var[var.name] = var
-        if epoch == 0:
-            for var in model.gloss_fc.trainable_variables:
-                remove_var[var.name] = var
+        # if epoch == 0:
+        #     for var in model.gloss_fc.trainable_variables:
+        #         remove_var[var.name] = var
         # last variable needed to train
         variables = []
         for var in total_variables:
             if var.name not in remove_var:
                 variables.append(var)
                 if var_print: logger.info("{}, {}".format(var.name, var.shape))
-    elif isinstance(model.cnn_model, alexnet.AlexNet):
+    elif config.cnn_architecture == "alexnet":
         # logger.info("==== CNN model using AlexNet ====")
         total_variables = model.trainable_variables
         # variable not to training
         remove_var = {}
-        if epoch == 0:
-            for var in model.gloss_fc.trainable_variables:
-                remove_var[var.name] = var
+        # if epoch == 0:
+        #     for var in model.gloss_fc.trainable_variables:
+        #         remove_var[var.name] = var
         # last variable needed to train
         variables = []
         for var in total_variables:
@@ -112,14 +116,16 @@ def infer():
     total_wer = []
     for batch_num, batch_data in enumerate(infer_dataset.take(config.debug_num)):
         src, tgt, src_len, tgt_len = batch_data
-        predicts = model(batch_data, training=False)
+        predicts, prob = model(batch_data, training=False)
+        # print(predicts.shape)
         for pred_ids, tgt_ids in zip(predicts.numpy(), tgt.numpy()):
-            pred_sent = [idx2word(idx) for idx in list(pred_ids)]
-            tgt_sent = [idx2word(idx) for idx in list(tgt_ids)]
+            pred_sent = [idx2word[idx] for idx in list(pred_ids)]
+            tgt_sent = [idx2word[idx] for idx in list(tgt_ids)]
             dist = editdistance.eval(pred_sent, tgt_sent)
             wer = dist / (max(len(pred_sent), len(tgt_sent)))
             total_wer.append(wer)
-        if batch_num % 50 == 0:
+        if batch_num % 100 == 0:
+            print(prob)
             logger.info("\n reference sentences: {} \n predicted senteces: {}".format(" ".join(tgt_sent),
                                                                                       " ".join(pred_sent)))
     test_wer = sum(total_wer) / len(total_wer)
@@ -156,7 +162,7 @@ def main(global_step=global_step):
                 global_step = tf.add(global_step, 1)
 
             test_wer = infer()
-            save_file_prefix=chkpoint_prefix + "_wer_{:.4f}".format(test_wer) + "-" + str(global_step.numpy())
+            save_file_prefix = chkpoint_prefix + "_wer_{:.4f}".format(test_wer) + "-" + str(global_step.numpy())
             checkpoint.save(save_file_prefix)
             logger.info("Saving model to {}".format(save_file_prefix))
             if test_wer > init_wer:

@@ -11,6 +11,7 @@ python -m main_sf_ctc \
 	--best_output="./output_dir/checkpoints_sfnet_ctc/best_wer" \
 	--rnn_units=256 \
 	--steps_per_epoch=-1 \
-	--learning_rate=1e-4 \
+	--learning_rate=0.0001 \
 	--debug_num=-1 \
+	--config.cnn_architecture="resnet" \
 	> output_dir/train_sf_ctc.log 2>&1 &

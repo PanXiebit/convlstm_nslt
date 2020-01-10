@@ -4,10 +4,9 @@ import numpy as np
 
 
 class AlexNet(tf.keras.Model):
-    def __init__(self, dropout_rate, weights_path):
+    def __init__(self, dropout_rate):
         super(AlexNet, self).__init__()
         self.dropout_rate = dropout_rate
-        self.weights_path = weights_path
 
         self.conv1 = Conv2D(filters=96, kernel_size=(11, 11), strides=(4, 4),
                             padding="valid", name="conv1")
@@ -45,8 +44,8 @@ class AlexNet(tf.keras.Model):
         self.fc7 = Dense(units=4096, activation=tf.nn.relu, use_bias=True, name="fc7")
         self.dropout7 =  Dropout(rate=self.dropout_rate, name="dropout7")
 
-    def load_weights(self):
-        weights_dict = np.load(self.weights_path, encoding='bytes').item()
+    def load_weights(self, weights_path):
+        weights_dict = np.load(weights_path, encoding='bytes').item()
         
         assert "conv1" in weights_dict and len(weights_dict["conv1"]) == 2
         self.conv1.set_weights(weights_dict["conv1"])
